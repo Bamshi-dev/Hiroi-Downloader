@@ -520,7 +520,7 @@ pub struct EngineArgs {
 
     /// Refuse to run without --proxy, so a forgotten setting cannot
     /// expose your address.
-    #[arg(long, env = "HIROI_REQUIRE_PROXY")]
+    #[arg(long, env = "HIROI_REQUIRE_PROXY", value_parser = clap::builder::BoolishValueParser::new())]
     pub require_proxy: bool,
 
     /// Remove tracking parameters (utm_source, fbclid, ...) from links.
