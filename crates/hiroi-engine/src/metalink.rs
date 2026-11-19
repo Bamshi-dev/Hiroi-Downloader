@@ -66,7 +66,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<MetaFile>> {
         let checksum = strongest_hash(file);
         let urls = urls(file);
         if urls.is_empty() {
-            tracing::warn!(name = %path.join("/"), "skipping a Metalink file without HTTP sources");
+            tracing::warn!(name = %path.join("/"), "skipping a Metalink file without sources we can use");
             continue;
         }
         parsed.push(MetaFile {
@@ -115,7 +115,7 @@ fn strongest_hash(file: &Element) -> Option<Checksum> {
         })
 }
 
-/// HTTP and HTTPS sources, best first. Version 4 ranks by `priority`
+/// Sources this build can use, best first. Version 4 ranks by `priority`
 /// (1 is best); version 3 by `preference` (100 is best).
 fn urls(file: &Element) -> Vec<Url> {
     let mut ranked: Vec<(u32, Url)> = file
@@ -127,7 +127,7 @@ fn urls(file: &Element) -> Vec<Url> {
         )
         .filter_map(|url| {
             let parsed = Url::parse(url.text.trim()).ok()?;
-            if !matches!(parsed.scheme(), "http" | "https") {
+            if !crate::request::is_supported(parsed.scheme()) {
                 return None;
             }
             let rank = match (url.attr("priority"), url.attr("preference")) {
@@ -211,7 +211,11 @@ mod tests {
             format!("sha256:{SHA256_OF_ABC}")
         );
         let hosts: Vec<_> = file.urls.iter().map(|u| u.host_str().unwrap()).collect();
-        assert_eq!(hosts, ["one.example", "two.example"]);
+        if cfg!(feature = "ftp") {
+            assert_eq!(hosts, ["one.example", "old.example", "two.example"]);
+        } else {
+            assert_eq!(hosts, ["one.example", "two.example"]);
+        }
     }
 
     #[test]
@@ -227,7 +231,12 @@ mod tests {
             <file name="nowhere.bin"><resources><url type="ftp">ftp://a.example/n</url></resources></file>
             </files></metalink>"#;
         let files = parse(text).unwrap();
-        assert_eq!(files.len(), 2, "the FTP-only file is skipped");
+        let expected = if cfg!(feature = "ftp") { 3 } else { 2 };
+        assert_eq!(
+            files.len(),
+            expected,
+            "an FTP-only file needs the ftp feature"
+        );
         assert_eq!(files[0].path, ["etc", "passwd"]);
         assert_eq!(files[0].urls[0].host_str(), Some("b.example"));
         assert_eq!(files[1].path, ["docs", "guide.pdf"]);

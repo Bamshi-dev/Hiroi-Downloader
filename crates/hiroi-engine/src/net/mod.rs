@@ -1,6 +1,8 @@
 //! Everything that talks to servers.
 
 pub(crate) mod client;
+#[cfg(feature = "ftp")]
+pub(crate) mod ftp;
 pub(crate) mod headers;
 pub(crate) mod probe;
 pub(crate) mod protocol;

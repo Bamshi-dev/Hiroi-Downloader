@@ -19,14 +19,21 @@ parking_lot.workspace = true
 percent-encoding.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
+rustls-platform-verifier = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
+suppaftp = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
+tokio-rustls = { workspace = true, optional = true }
 tokio-util.workspace = true
 tracing.workspace = true
+
+[features]
+# FTP and FTPS sources, off by default.
+ftp = ["dep:suppaftp", "dep:tokio-rustls", "dep:rustls-platform-verifier"]
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

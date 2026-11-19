@@ -7,7 +7,7 @@ pub enum EngineError {
     #[error("invalid URL `{0}`")]
     InvalidUrl(String),
 
-    #[error("unsupported URL scheme `{0}` (only http and https are allowed)")]
+    #[error("unsupported URL scheme `{0}` (this build downloads {list})", list = crate::request::scheme_list())]
     UnsupportedScheme(String),
 
     #[error("invalid header: {0}")]
@@ -21,6 +21,10 @@ pub enum EngineError {
 
     #[error("server answered {status} for {url}")]
     HttpStatus { status: u16, url: String },
+
+    /// A connection failed on a protocol other than HTTP.
+    #[error("connection failed: {0}")]
+    Connection(String),
 
     /// Network failure. The URL is stripped so it cannot leak into logs.
     #[error("network error: {0}")]

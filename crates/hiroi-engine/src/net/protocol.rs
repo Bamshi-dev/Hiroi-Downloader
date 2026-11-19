@@ -40,7 +40,11 @@ pub(crate) async fn probe(
     url: &Url,
     headers: &HeaderMap,
 ) -> FetchResult<RemoteFile> {
-    probe::probe(&shared.client, url, headers).await
+    match url.scheme() {
+        #[cfg(feature = "ftp")]
+        "ftp" | "ftps" => super::ftp::probe(shared, url).await,
+        _ => probe::probe(&shared.client, url, headers).await,
+    }
 }
 
 /// Opens what `want` asks for. The caller holds the connection and host
@@ -52,7 +56,11 @@ pub(crate) async fn open(
     gate: &HostGate,
     want: Want,
 ) -> FetchResult<Body> {
-    open_http(shared, source, headers, gate, want).await
+    match source.url().scheme() {
+        #[cfg(feature = "ftp")]
+        "ftp" | "ftps" => super::ftp::open(shared, source, gate, want).await,
+        _ => open_http(shared, source, headers, gate, want).await,
+    }
 }
 
 async fn open_http(

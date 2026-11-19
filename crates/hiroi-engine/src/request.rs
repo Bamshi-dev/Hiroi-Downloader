@@ -225,12 +225,34 @@ impl DownloadRequest {
     }
 }
 
+/// URL schemes this build can download.
+#[cfg(not(feature = "ftp"))]
+const SCHEMES: &[&str] = &["http", "https"];
+#[cfg(feature = "ftp")]
+const SCHEMES: &[&str] = &["http", "https", "ftp", "ftps"];
+
+pub(crate) fn is_supported(scheme: &str) -> bool {
+    SCHEMES.contains(&scheme)
+}
+
+/// `http and https`, or `http, https, ftp, and ftps`, for messages.
+pub(crate) fn scheme_list() -> String {
+    match SCHEMES {
+        [] => String::new(),
+        [only] => only.to_string(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
 fn parse_url(url: &str) -> Result<Url> {
     let parsed = Url::parse(url.trim()).map_err(|_| EngineError::InvalidUrl(url.to_string()))?;
     match parsed.scheme() {
-        "http" | "https" if parsed.host().is_some() => Ok(parsed),
-        "http" | "https" => Err(EngineError::InvalidUrl(url.to_string())),
-        other => Err(EngineError::UnsupportedScheme(other.to_string())),
+        scheme if !is_supported(scheme) => {
+            Err(EngineError::UnsupportedScheme(parsed.scheme().to_string()))
+        }
+        _ if parsed.host().is_none() => Err(EngineError::InvalidUrl(url.to_string())),
+        _ => Ok(parsed),
     }
 }
 

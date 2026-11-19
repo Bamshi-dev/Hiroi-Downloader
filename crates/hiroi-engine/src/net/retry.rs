@@ -40,6 +40,10 @@ pub(crate) type FetchResult<T> = std::result::Result<T, FetchError>;
 #[derive(Debug)]
 pub(crate) enum FetchError {
     Transport(reqwest::Error),
+    /// A transport failure on a protocol other than HTTP. Only the
+    /// optional protocols raise it.
+    #[cfg_attr(not(feature = "ftp"), allow(dead_code))]
+    Connection(String),
     Status {
         status: StatusCode,
         retry_after: Option<Duration>,
@@ -70,6 +74,7 @@ impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Transport(error) => write!(f, "{}", describe_transport(error)),
+            Self::Connection(message) => f.write_str(message),
             Self::Status { status, .. } => write!(f, "server answered {status}"),
             Self::ClosedEarly => f.write_str("connection closed early"),
             Self::Slow => f.write_str("connection too slow, reconnecting"),
@@ -85,6 +90,7 @@ impl FetchError {
     pub(crate) fn into_engine_error(self, url: &str) -> EngineError {
         match self {
             Self::Transport(error) => EngineError::network(error),
+            Self::Connection(message) => EngineError::Connection(message),
             Self::Status { status, .. } => EngineError::HttpStatus {
                 status: status.as_u16(),
                 url: url.to_string(),
@@ -129,7 +135,9 @@ impl RetryPolicy {
             FetchError::Cancelled | FetchError::Fatal(_) => RetryAction::Abort,
             FetchError::Changed | FetchError::Protocol(_) => RetryAction::DropSource,
             FetchError::Transport(error) if error.is_redirect() => RetryAction::DropSource,
-            FetchError::Transport(_) | FetchError::ClosedEarly => self.retry_or_drop(attempt, None),
+            FetchError::Transport(_) | FetchError::Connection(_) | FetchError::ClosedEarly => {
+                self.retry_or_drop(attempt, None)
+            }
             // Reconnecting right away is the point; the connection made progress.
             FetchError::Slow => RetryAction::Retry(Duration::ZERO),
             FetchError::Status {
