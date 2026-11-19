@@ -48,5 +48,7 @@ pub use inspect::{RemoteInfo, SourceInfo};
 pub use listener::DownloadListener;
 pub use net::retry::RetryPolicy;
 pub use request::{ConflictPolicy, DownloadRequest, Priority};
+/// URL type used throughout the API (re-exported from `reqwest`).
+pub use reqwest::Url;
 pub use snapshot::{DownloadId, DownloadSnapshot, DownloadStatus, SegmentSnapshot};
 pub use storage::naming::sanitize_file_name;

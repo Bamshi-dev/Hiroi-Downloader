@@ -1,0 +1,30 @@
+[package]
+name = "hiroi-daemon"
+description = "Background service of Hiroi Downloader: persistent queue and local API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+directories.workspace = true
+futures-util.workspace = true
+parking_lot.workspace = true
+hiroi-engine.workspace = true
+hiroi-proto.workspace = true
+hiroi-store.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[dev-dependencies]
+hiroi-testserver.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

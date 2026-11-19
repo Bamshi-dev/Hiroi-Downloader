@@ -84,14 +84,23 @@ impl Engine {
 
     /// Queues a download. It starts as soon as a slot is free.
     pub fn add(&self, request: DownloadRequest) -> DownloadId {
+        self.insert(request, DownloadStatus::Queued)
+    }
+
+    /// Adds a download without starting it; [`Engine::resume`] starts it.
+    pub fn add_paused(&self, request: DownloadRequest) -> DownloadId {
+        self.insert(request, DownloadStatus::Paused)
+    }
+
+    fn insert(&self, request: DownloadRequest, status: DownloadStatus) -> DownloadId {
         let id = DownloadId(self.inner.next_id.fetch_add(1, Ordering::Relaxed));
         let entry = Entry {
             rate: Arc::new(RateLimiter::new(request.speed_limit)),
             request: Arc::new(request),
-            status: DownloadStatus::Queued,
+            status: status.clone(),
             progress: Arc::default(),
             running: None,
-            status_tx: watch::Sender::new(DownloadStatus::Queued),
+            status_tx: watch::Sender::new(status),
         };
         let snapshot = {
             let mut downloads = self.inner.downloads.lock();
