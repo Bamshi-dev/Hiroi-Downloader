@@ -1,0 +1,87 @@
+[package]
+name = "hiroi-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hiroi-engine = { path = "../crates/hiroi-engine", features = ["fuzzing"] }
+hiroi-grab = { path = "../crates/hiroi-grab", features = ["fuzzing"] }
+
+# Kept out of the main workspace: cargo-fuzz needs a nightly compiler.
+[workspace]
+
+[[bin]]
+name = "headers"
+path = "fuzz_targets/headers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "file_name"
+path = "fuzz_targets/file_name.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_file"
+path = "fuzz_targets/control_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hls"
+path = "fuzz_targets/hls.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dash"
+path = "fuzz_targets/dash.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xml"
+path = "fuzz_targets/xml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "metalink"
+path = "fuzz_targets/metalink.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ytdlp"
+path = "fuzz_targets/ytdlp.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "page"
+path = "fuzz_targets/page.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "robots"
+path = "fuzz_targets/robots.rs"
+test = false
+doc = false
+bench = false

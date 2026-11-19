@@ -35,6 +35,8 @@ tokio-util.workspace = true
 tracing.workspace = true
 
 [features]
+# Entry points for the fuzz targets in fuzz/; not a public API.
+fuzzing = []
 # FTP and FTPS sources, off by default.
 ftp = ["dep:suppaftp", "dep:tokio-rustls", "dep:rustls-platform-verifier"]
 # SFTP sources, checked against known_hosts. Off by default.

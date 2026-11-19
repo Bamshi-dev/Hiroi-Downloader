@@ -12,6 +12,9 @@
 //! page instead.
 
 mod extract;
+#[cfg(any(test, feature = "fuzzing"))]
+#[doc(hidden)]
+pub mod fuzzing;
 mod kind;
 mod robots;
 

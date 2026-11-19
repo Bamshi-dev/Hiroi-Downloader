@@ -31,6 +31,9 @@ mod constants;
 mod engine;
 mod error;
 mod exposure;
+#[cfg(any(test, feature = "fuzzing"))]
+#[doc(hidden)]
+pub mod fuzzing;
 mod inspect;
 mod limit;
 mod listener;

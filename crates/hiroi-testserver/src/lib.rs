@@ -339,3 +339,63 @@ fn empty(status: StatusCode) -> Response {
         .body(Body::empty())
         .unwrap()
 }
+
+/// Mangled copies of `sample` for parser smoke tests: bytes flipped,
+/// cut, repeated, and swapped for tokens parsers trip over. The same
+/// seed gives the same copies, so a failure can be replayed.
+pub fn mutations(sample: &[u8], count: usize, seed: u64) -> impl Iterator<Item = Vec<u8>> + '_ {
+    const TOKENS: &[&[u8]] = &[
+        b"\0",
+        b"\xff\xfe",
+        b"-",
+        b"..",
+        b"/",
+        b"\\",
+        b"%",
+        b"%2F",
+        b"&amp;",
+        b"&#xFFFFFF;",
+        b"<",
+        b">",
+        b"\"",
+        b"'",
+        b"\n",
+        b"\r\n",
+        b"18446744073709551615",
+        b"-1",
+        b"0",
+        b"99999999999999999999",
+        b"bytes */",
+        b"$Number%0999d$",
+        b"#EXT-X-KEY:",
+        b"\xe2\x80\xae",
+    ];
+    let mut rng = fastrand::Rng::with_seed(seed);
+    (0..count).map(move |_| {
+        let mut data = sample.to_vec();
+        for _ in 0..rng.usize(1..=4) {
+            let at = rng.usize(..=data.len());
+            match rng.u8(..6) {
+                0 if !data.is_empty() => {
+                    let index = rng.usize(..data.len());
+                    data[index] ^= 1 << rng.u8(..8);
+                }
+                1 => data.truncate(at),
+                2 => {
+                    let end = rng.usize(at..=data.len());
+                    data.drain(at..end);
+                }
+                3 => {
+                    let end = rng.usize(at..=data.len().min(at + 64));
+                    let copy = data[at..end].to_vec();
+                    data.splice(at..at, copy.repeat(rng.usize(1..8)));
+                }
+                _ => {
+                    let token = TOKENS[rng.usize(..TOKENS.len())];
+                    data.splice(at..at, token.iter().copied());
+                }
+            }
+        }
+        data
+    })
+}
