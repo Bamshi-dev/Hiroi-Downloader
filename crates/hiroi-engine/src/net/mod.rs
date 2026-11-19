@@ -7,6 +7,8 @@ pub(crate) mod headers;
 pub(crate) mod probe;
 pub(crate) mod protocol;
 pub mod retry;
+#[cfg(feature = "sftp")]
+pub(crate) mod sftp;
 pub(crate) mod source;
 
 use reqwest::Url;

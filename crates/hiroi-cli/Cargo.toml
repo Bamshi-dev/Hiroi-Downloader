@@ -27,6 +27,7 @@ tracing-subscriber.workspace = true
 [features]
 # Optional protocols, off by default to keep the build small.
 ftp = ["hiroi-engine/ftp"]
+sftp = ["hiroi-engine/sftp"]
 
 [lints]
 workspace = true

@@ -43,6 +43,8 @@ pub(crate) async fn probe(
     match url.scheme() {
         #[cfg(feature = "ftp")]
         "ftp" | "ftps" => super::ftp::probe(shared, url).await,
+        #[cfg(feature = "sftp")]
+        "sftp" => super::sftp::probe(shared, url).await,
         _ => probe::probe(&shared.client, url, headers).await,
     }
 }
@@ -59,6 +61,8 @@ pub(crate) async fn open(
     match source.url().scheme() {
         #[cfg(feature = "ftp")]
         "ftp" | "ftps" => super::ftp::open(shared, source, gate, want).await,
+        #[cfg(feature = "sftp")]
+        "sftp" => super::sftp::open(shared, source, want).await,
         _ => open_http(shared, source, headers, gate, want).await,
     }
 }

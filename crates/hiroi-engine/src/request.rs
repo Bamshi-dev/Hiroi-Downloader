@@ -226,10 +226,16 @@ impl DownloadRequest {
 }
 
 /// URL schemes this build can download.
-#[cfg(not(feature = "ftp"))]
-const SCHEMES: &[&str] = &["http", "https"];
-#[cfg(feature = "ftp")]
-const SCHEMES: &[&str] = &["http", "https", "ftp", "ftps"];
+const SCHEMES: &[&str] = &[
+    "http",
+    "https",
+    #[cfg(feature = "ftp")]
+    "ftp",
+    #[cfg(feature = "ftp")]
+    "ftps",
+    #[cfg(feature = "sftp")]
+    "sftp",
+];
 
 pub(crate) fn is_supported(scheme: &str) -> bool {
     SCHEMES.contains(&scheme)

@@ -42,7 +42,7 @@ pub(crate) enum FetchError {
     Transport(reqwest::Error),
     /// A transport failure on a protocol other than HTTP. Only the
     /// optional protocols raise it.
-    #[cfg_attr(not(feature = "ftp"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "ftp", feature = "sftp")), allow(dead_code))]
     Connection(String),
     Status {
         status: StatusCode,

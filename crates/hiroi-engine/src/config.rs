@@ -43,6 +43,9 @@ pub struct EngineConfig {
     pub progress_interval: Duration,
     /// The yt-dlp program, for pages that need a site extractor.
     pub yt_dlp: PathBuf,
+    /// known_hosts file that SFTP servers are checked against;
+    /// `~/.ssh/known_hosts` when `None`.
+    pub ssh_known_hosts: Option<PathBuf>,
 }
 
 impl Default for EngineConfig {
@@ -67,6 +70,7 @@ impl Default for EngineConfig {
             checkpoint_interval: constants::CHECKPOINT_INTERVAL,
             progress_interval: constants::PROGRESS_INTERVAL,
             yt_dlp: PathBuf::from("yt-dlp"),
+            ssh_known_hosts: None,
         }
     }
 }

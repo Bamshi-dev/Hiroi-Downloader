@@ -19,6 +19,8 @@ parking_lot.workspace = true
 percent-encoding.workspace = true
 quick-xml.workspace = true
 reqwest.workspace = true
+russh = { workspace = true, optional = true }
+russh-sftp = { workspace = true, optional = true }
 rustls-platform-verifier = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
@@ -34,6 +36,8 @@ tracing.workspace = true
 [features]
 # FTP and FTPS sources, off by default.
 ftp = ["dep:suppaftp", "dep:tokio-rustls", "dep:rustls-platform-verifier"]
+# SFTP sources, checked against known_hosts. Off by default.
+sftp = ["dep:russh", "dep:russh-sftp"]
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
