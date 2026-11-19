@@ -90,6 +90,14 @@ pub enum Request {
     },
     Categories,
     SetCategories(Categories),
+    /// Desktop notifications when jobs finish (on by default).
+    SetNotifications {
+        enabled: bool,
+    },
+    /// Power the computer off once no job is left to run. Fires once.
+    PowerOffWhenDone {
+        enabled: bool,
+    },
     Schedules,
     AddSchedule(Schedule),
     RemoveSchedule {
@@ -125,6 +133,11 @@ pub struct NewJob {
     pub headers: Vec<(String, String)>,
     /// Add the job even if the same file is already in the list.
     pub allow_duplicate: bool,
+    /// Program and arguments to run when the job completes. `{path}`,
+    /// `{name}`, and `{dir}` are replaced. It runs without a shell.
+    pub run_after: Option<Vec<String>>,
+    /// Open the folder in the file manager when the job completes.
+    pub open_folder: bool,
 }
 
 /// Files whose extension matches go into `folder` (relative to the

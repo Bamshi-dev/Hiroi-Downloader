@@ -68,6 +68,8 @@ pub struct JobOptions {
     pub checksum: Option<String>,
     pub on_conflict: Option<Conflict>,
     pub priority: Option<Priority>,
+    pub run_after: Option<Vec<String>>,
+    pub open_folder: bool,
 }
 
 /// A job about to be inserted; the store assigns the id.

@@ -32,6 +32,14 @@ impl Fixture {
             database: self.root.path().join("data").join("hiroi.db"),
             download_dir: self.downloads(),
             engine,
+            power_off_command: vec![
+                "touch".into(),
+                self.root
+                    .path()
+                    .join("powered-off")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
         }
     }
 
@@ -395,4 +403,62 @@ async fn categories_sort_files_and_duplicates_are_refused() {
             .join("clip (1).mp4")
             .exists()
     );
+}
+
+#[tokio::test]
+async fn commands_run_after_downloads_and_power_off_waits_for_the_last_job() {
+    let server = TestServer::start(Behavior {
+        bytes_per_sec: Some(256 * 1024),
+        ..Behavior::default()
+    })
+    .await;
+    server.put("one.bin", content(64 * 1024, 8));
+    server.put("two.bin", content(1024 * 1024, 9));
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+    let marker = fixture.root.path().join("ran");
+    let powered = fixture.root.path().join("powered-off");
+
+    client
+        .call(Request::SetNotifications { enabled: false })
+        .await
+        .unwrap();
+    let run_after = vec![
+        "cp".into(),
+        "{path}".into(),
+        marker.to_string_lossy().into_owned(),
+    ];
+    let first = NewJob {
+        url: server.url("one.bin"),
+        run_after: Some(run_after),
+        ..NewJob::default()
+    };
+    let first = add(&mut client, first).await;
+    let second = add(
+        &mut client,
+        NewJob {
+            url: server.url("two.bin"),
+            // One connection at 256 KiB/s: about four seconds.
+            connections: Some(1),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    client
+        .call(Request::PowerOffWhenDone { enabled: true })
+        .await
+        .unwrap();
+
+    wait_for(&mut client, first, JobStatus::Completed).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        read(&marker),
+        content(64 * 1024, 8),
+        "the command got the finished file"
+    );
+    assert!(!powered.exists(), "another job is still running");
+
+    wait_for(&mut client, second, JobStatus::Completed).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(powered.exists(), "power off runs after the last job");
 }

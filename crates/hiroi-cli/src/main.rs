@@ -49,6 +49,22 @@ async fn client_command(
         Command::Queue(command) => jobs::queue(&mut client, command).await,
         Command::Schedule(command) => jobs::schedule(&mut client, command).await,
         Command::Category(command) => jobs::category(&mut client, command).await,
+        Command::Notifications { state } => {
+            let enabled = matches!(state, args::Switch::On);
+            jobs::switch(
+                &mut client,
+                hiroi_proto::Request::SetNotifications { enabled },
+            )
+            .await
+        }
+        Command::PowerOffWhenDone { state } => {
+            let enabled = matches!(state, args::Switch::On);
+            jobs::switch(
+                &mut client,
+                hiroi_proto::Request::PowerOffWhenDone { enabled },
+            )
+            .await
+        }
         Command::Stop => jobs::stop(&mut client).await,
         Command::Get(_) | Command::Info(_) | Command::Daemon(_) => unreachable!("handled in main"),
     }

@@ -17,6 +17,7 @@ hiroi-proto.workspace = true
 clap.workspace = true
 hiroi-engine.workspace = true
 indicatif.workspace = true
+shell-words.workspace = true
 tokio.workspace = true
 tracing-subscriber.workspace = true
 

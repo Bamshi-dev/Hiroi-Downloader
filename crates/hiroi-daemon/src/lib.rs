@@ -11,6 +11,7 @@
 //! is readable by its owner only, and every connection is checked with
 //! the kernel's peer credentials.
 
+mod actions;
 mod category;
 pub mod client;
 mod convert;

@@ -16,6 +16,8 @@ pub fn job_options(job: &NewJob) -> JobOptions {
         checksum: job.checksum.clone(),
         on_conflict: job.on_conflict,
         priority: job.priority,
+        run_after: job.run_after.clone().filter(|argv| !argv.is_empty()),
+        open_folder: job.open_folder,
     }
 }
 

@@ -25,7 +25,7 @@ use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::schedule::{self, Desired, Moment};
-use crate::{category, convert, paths, server};
+use crate::{actions, category, convert, paths, server};
 
 /// How often the progress of running jobs is written to the database.
 const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(5);
@@ -34,6 +34,7 @@ const EVENT_BUFFER: usize = 1024;
 const DEFAULT_QUEUE: &str = "main";
 const GLOBAL_LIMIT_KEY: &str = "global_speed_limit";
 const CATEGORIES_KEY: &str = "categories";
+const NOTIFICATIONS_KEY: &str = "notifications";
 
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
@@ -42,6 +43,8 @@ pub struct DaemonConfig {
     /// Folder for jobs that do not name their own.
     pub download_dir: PathBuf,
     pub engine: EngineConfig,
+    /// Command run for "power off when done".
+    pub power_off_command: Vec<String>,
 }
 
 impl DaemonConfig {
@@ -52,6 +55,7 @@ impl DaemonConfig {
             database: paths::default_database(),
             download_dir: paths::default_download_dir(),
             engine,
+            power_off_command: actions::POWER_OFF.iter().map(|s| s.to_string()).collect(),
         }
     }
 }
@@ -91,7 +95,13 @@ pub async fn run(
 
     let store = Arc::new(Store::open(&config.database)?);
     let engine = Engine::new(config.engine.clone())?;
-    let service = Service::start(engine, store, config.download_dir.clone()).await?;
+    let service = Service::start(
+        engine,
+        store,
+        config.download_dir.clone(),
+        config.power_off_command.clone(),
+    )
+    .await?;
     let listener = server::bind(&config.socket)?;
     tracing::info!(socket = %config.socket.display(), "service ready");
 
@@ -124,6 +134,7 @@ pub(crate) struct Service {
     /// are not the user's: the jobs must start again on the next run.
     stopping: AtomicBool,
     schedules_changed: Arc<Notify>,
+    power_off_command: Vec<String>,
 }
 
 #[derive(Default)]
@@ -141,6 +152,8 @@ struct State {
     /// The speed limit set by the user; windows may lower it for a while.
     base_limit: Option<u64>,
     categories: Option<Categories>,
+    notifications: bool,
+    power_off_when_done: bool,
 }
 
 enum Write {
@@ -157,6 +170,7 @@ impl Service {
         engine: Engine,
         store: Arc<Store>,
         default_dir: PathBuf,
+        power_off_command: Vec<String>,
     ) -> Result<Arc<Self>, DaemonError> {
         let (writes, queue) = mpsc::unbounded_channel();
         let writer = tokio::spawn(write_loop(Arc::clone(&store), queue));
@@ -172,6 +186,7 @@ impl Service {
             shutdown: Notify::new(),
             stopping: AtomicBool::new(false),
             schedules_changed: Arc::new(Notify::new()),
+            power_off_command,
         });
         service.engine.add_listener(Arc::new(Recorder {
             service: Arc::downgrade(&service),
@@ -189,7 +204,7 @@ impl Service {
     /// paused and failed ones without starting.
     async fn restore(&self) -> Result<(), DaemonError> {
         let store = Arc::clone(&self.store);
-        let (rows, limit, stopped, schedules, categories) =
+        let (rows, limit, stopped, schedules, categories, notifications) =
             tokio::task::spawn_blocking(move || {
                 Ok::<_, StoreError>((
                     store.jobs()?,
@@ -197,6 +212,7 @@ impl Service {
                     store.stopped_queues()?,
                     store.schedules()?,
                     store.setting(CATEGORIES_KEY)?,
+                    store.setting(NOTIFICATIONS_KEY)?,
                 ))
             })
             .await
@@ -209,6 +225,7 @@ impl Service {
             state.stopped = stopped.into_iter().collect();
             state.schedules = schedules;
             state.categories = categories.and_then(|json| serde_json::from_str(&json).ok());
+            state.notifications = notifications.as_deref() != Some("off");
         }
         for row in rows {
             let id = row.id;
@@ -297,6 +314,19 @@ impl Service {
             }
             Request::StopQueue { queue } => {
                 self.set_queue_running(&queue, false);
+                Ok(Response::Done)
+            }
+            Request::SetNotifications { enabled } => {
+                self.state.lock().notifications = enabled;
+                let value = if enabled { "on" } else { "off" };
+                let _ = self
+                    .writes
+                    .send(Write::Setting(NOTIFICATIONS_KEY.into(), value.into()));
+                Ok(Response::Done)
+            }
+            Request::PowerOffWhenDone { enabled } => {
+                self.state.lock().power_off_when_done = enabled;
+                self.check_power_off();
                 Ok(Response::Done)
             }
             Request::Categories => Ok(Response::Categories(self.categories())),
@@ -399,6 +429,63 @@ impl Service {
         self.load(&in_memory, &job.headers, !job.paused);
         self.publish(id);
         Ok(id)
+    }
+
+    /// Notification, the job's own command, and opening its folder.
+    fn after_finish(&self, id: JobId, status: JobStatus) {
+        let (row, notify) = {
+            let state = self.state.lock();
+            (state.rows.get(&id).cloned(), state.notifications)
+        };
+        let Some(row) = row else {
+            return;
+        };
+        let name = row
+            .file_name
+            .clone()
+            .unwrap_or_else(|| convert::display_url(&row.url));
+        if notify {
+            match status {
+                JobStatus::Completed => actions::notify("Download finished", &name),
+                _ => actions::notify(
+                    "Download failed",
+                    &format!("{name}: {}", row.error.unwrap_or_default()),
+                ),
+            }
+        }
+        if status == JobStatus::Completed
+            && let Some(path) = &row.path
+        {
+            if let Some(argv) = &row.options.run_after {
+                actions::run_after(argv, path);
+            }
+            if row.options.open_folder {
+                actions::open_folder(path);
+            }
+        }
+        self.check_power_off();
+    }
+
+    /// Powers off once nothing is left to run, if the user asked for it.
+    fn check_power_off(&self) {
+        let mut state = self.state.lock();
+        if !state.power_off_when_done {
+            return;
+        }
+        let busy = state.rows.values().any(|row| {
+            matches!(
+                row.status,
+                JobStatus::Queued
+                    | JobStatus::Connecting
+                    | JobStatus::Downloading
+                    | JobStatus::Verifying
+            ) && !state.stopped.contains(&row.queue)
+        });
+        if !busy {
+            state.power_off_when_done = false;
+            drop(state);
+            actions::power_off(&self.power_off_command);
+        }
     }
 
     fn categories(&self) -> Categories {
@@ -803,6 +890,9 @@ impl Service {
             finished_at: finished.then(now),
         };
         self.update(id, update);
+        if matches!(status, JobStatus::Completed | JobStatus::Failed) {
+            self.after_finish(id, status);
+        }
         if finished {
             // Finished jobs leave the engine; the row keeps their history.
             let mut state = self.state.lock();

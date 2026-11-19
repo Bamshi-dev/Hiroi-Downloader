@@ -60,6 +60,10 @@ pub enum Command {
     /// Folders by file type for downloads that name no folder.
     #[command(subcommand)]
     Category(CategoryCommand),
+    /// Desktop notifications when downloads finish.
+    Notifications { state: Switch },
+    /// Power the computer off once every download is done.
+    PowerOffWhenDone { state: Switch },
     /// Stop the background service; running jobs continue next time.
     Stop,
 }
@@ -113,6 +117,16 @@ pub struct AddArgs {
     /// Add even if the same file is already in the list.
     #[arg(long)]
     pub allow_duplicate: bool,
+
+    /// Run a command when the download completes, e.g.
+    /// `--then 'sha256sum {path}'`. Split like a shell would, but run
+    /// without one; {path}, {name}, and {dir} are replaced.
+    #[arg(long, value_name = "COMMAND")]
+    pub then: Option<String>,
+
+    /// Open the folder in the file manager when the download completes.
+    #[arg(long)]
+    pub open_folder: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -329,6 +343,12 @@ pub struct EngineArgs {
     /// Follow redirects from HTTPS to plain HTTP (unsafe).
     #[arg(long)]
     pub allow_insecure_redirects: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum Switch {
+    On,
+    Off,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

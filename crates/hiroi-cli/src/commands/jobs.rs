@@ -34,6 +34,12 @@ pub async fn add(client: &mut Client, args: AddArgs) -> Result<ExitCode> {
         job.queue = args.queue.clone();
         job.paused = args.paused;
         job.allow_duplicate = args.allow_duplicate;
+        job.open_folder = args.open_folder;
+        if let Some(command) = &args.then {
+            let argv = shell_words::split(command)
+                .with_context(|| format!("cannot parse --then `{command}`"))?;
+            job.run_after = Some(argv);
+        }
         if args.high_priority {
             job.priority = Some(Priority::High);
         }
@@ -369,5 +375,10 @@ pub async fn category(client: &mut Client, command: CategoryCommand) -> Result<E
         }
     }
     client.call(Request::SetCategories(categories)).await?;
+    Ok(ExitCode::SUCCESS)
+}
+
+pub async fn switch(client: &mut Client, request: Request) -> Result<ExitCode> {
+    client.call(request).await?;
     Ok(ExitCode::SUCCESS)
 }
