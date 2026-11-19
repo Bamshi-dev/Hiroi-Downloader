@@ -1,6 +1,11 @@
 //! An HTTP file server for tests and benchmarks that can misbehave on
 //! purpose: it throttles, drops connections, answers 429, changes files
-//! while they are being downloaded, and sends hostile headers.
+//! while they are being downloaded, and sends hostile headers. A small
+//! FTP server sits next to it.
+
+mod ftp;
+
+pub use ftp::{FtpBehavior, FtpServer};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
