@@ -97,6 +97,10 @@ pub struct DownloadRequest {
     pub(crate) conflict: ConflictPolicy,
     pub(crate) priority: Priority,
     pub(crate) stream: StreamOptions,
+    /// Set on the downloads one download turns into (the files of a
+    /// Metalink, the tracks of a video page), so they are not followed
+    /// again.
+    pub(crate) derived: bool,
 }
 
 impl DownloadRequest {
@@ -112,6 +116,7 @@ impl DownloadRequest {
             conflict: ConflictPolicy::default(),
             priority: Priority::default(),
             stream: StreamOptions::default(),
+            derived: false,
         })
     }
 

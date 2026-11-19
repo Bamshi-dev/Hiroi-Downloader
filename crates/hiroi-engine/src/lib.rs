@@ -34,6 +34,7 @@ mod inspect;
 mod limit;
 mod listener;
 mod media;
+mod metalink;
 mod net;
 mod request;
 mod snapshot;

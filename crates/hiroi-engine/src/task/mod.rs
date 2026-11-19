@@ -21,6 +21,7 @@ use crate::error::{EngineError, Result};
 use crate::inspect;
 use crate::limit::{HostLimiter, RateLimiter};
 use crate::media;
+use crate::metalink;
 use crate::net::probe::RemoteFile;
 use crate::net::source::SourcePool;
 use crate::request::{ConflictPolicy, DownloadRequest};
@@ -61,7 +62,8 @@ impl TaskContext {
     /// The same task working on another request, such as one of the
     /// tracks an extractor found. Progress, limits, and cancellation
     /// stay shared.
-    pub fn derive(&self, request: DownloadRequest) -> Self {
+    pub fn derive(&self, mut request: DownloadRequest) -> Self {
+        request.derived = true;
         Self {
             id: self.id,
             request: Arc::new(request),
@@ -121,6 +123,9 @@ pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     let (pool, remote) = inspect::select(&ctx.request, results)?;
     if let Some(kind) = media::detect(&remote) {
         return media::download(&ctx, remote.final_url.clone(), kind).await;
+    }
+    if !ctx.request.derived && metalink::detect(&remote) {
+        return metalink::download(&ctx, &remote.final_url).await;
     }
     download_file(&ctx, pool, remote).await
 }
