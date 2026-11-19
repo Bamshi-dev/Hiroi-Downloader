@@ -18,7 +18,7 @@ mod migrations;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use hiroi_proto::{Conflict, JobId, JobStatus, Priority};
+use hiroi_proto::{Conflict, JobId, JobStatus, Priority, Schedule};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -242,6 +242,70 @@ impl Store {
         Ok(())
     }
 
+    /// Names of the queues that are held.
+    pub fn stopped_queues(&self) -> Result<Vec<String>> {
+        let connection = self.lock();
+        let mut statement =
+            connection.prepare("SELECT name FROM queues WHERE stopped = 1 ORDER BY name")?;
+        let names = statement.query_map([], |row| row.get(0))?;
+        Ok(names.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn set_queue_stopped(&self, name: &str, stopped: bool) -> Result<()> {
+        self.lock().execute(
+            "INSERT INTO queues (name, stopped) VALUES (?1, ?2)
+             ON CONFLICT (name) DO UPDATE SET stopped = excluded.stopped",
+            params![name, stopped],
+        )?;
+        Ok(())
+    }
+
+    pub fn schedules(&self) -> Result<Vec<Schedule>> {
+        let connection = self.lock();
+        let mut statement = connection.prepare(
+            "SELECT id, days, from_minute, to_minute, action FROM schedules ORDER BY id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let action: String = row.get(4)?;
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, action))
+        })?;
+        let mut schedules = Vec::new();
+        for row in rows {
+            let (id, days, from_minute, to_minute, action) = row?;
+            let action = serde_json::from_str(&action)
+                .map_err(|_| StoreError::Corrupt(format!("unreadable schedule {id}")))?;
+            schedules.push(Schedule {
+                id,
+                days,
+                from_minute,
+                to_minute,
+                action,
+            });
+        }
+        Ok(schedules)
+    }
+
+    pub fn insert_schedule(&self, schedule: &Schedule) -> Result<i64> {
+        let connection = self.lock();
+        connection.execute(
+            "INSERT INTO schedules (days, from_minute, to_minute, action) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                schedule.days,
+                schedule.from_minute,
+                schedule.to_minute,
+                to_json(&schedule.action)
+            ],
+        )?;
+        Ok(connection.last_insert_rowid())
+    }
+
+    pub fn delete_schedule(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .lock()
+            .execute("DELETE FROM schedules WHERE id = ?1", params![id])?
+            > 0)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Connection> {
         self.connection
             .lock()
@@ -387,6 +451,29 @@ mod tests {
         assert!(store.delete_job(first).unwrap());
         assert!(!store.delete_job(first).unwrap());
         assert_eq!(store.jobs().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn queues_and_schedules_persist() {
+        use hiroi_proto::{EVERY_DAY, ScheduleAction};
+        let store = Store::in_memory().unwrap();
+        store.set_queue_stopped("night", true).unwrap();
+        store.set_queue_stopped("main", false).unwrap();
+        assert_eq!(store.stopped_queues().unwrap(), ["night"]);
+
+        let rule = Schedule {
+            id: 0,
+            days: EVERY_DAY,
+            from_minute: 60,
+            to_minute: Some(420),
+            action: ScheduleAction::RunQueue {
+                queue: "night".into(),
+            },
+        };
+        let id = store.insert_schedule(&rule).unwrap();
+        assert_eq!(store.schedules().unwrap(), [Schedule { id, ..rule }]);
+        assert!(store.delete_schedule(id).unwrap());
+        assert!(store.schedules().unwrap().is_empty());
     }
 
     #[test]

@@ -14,6 +14,7 @@
 pub mod client;
 mod convert;
 pub mod paths;
+pub mod schedule;
 mod server;
 mod service;
 

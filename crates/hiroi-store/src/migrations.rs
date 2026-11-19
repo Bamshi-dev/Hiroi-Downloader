@@ -22,9 +22,21 @@ const MIGRATIONS: &[&str] = &[
         finished_at INTEGER
     );
     CREATE INDEX jobs_by_status ON jobs (status);
-    CREATE TABLE settings (
+        CREATE TABLE settings (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
+    );",
+    // 2: queues that are held, and scheduler rules.
+    "CREATE TABLE queues (
+        name    TEXT PRIMARY KEY,
+        stopped INTEGER NOT NULL
+    );
+    CREATE TABLE schedules (
+        id          INTEGER PRIMARY KEY,
+        days        INTEGER NOT NULL,
+        from_minute INTEGER NOT NULL,
+        to_minute   INTEGER,
+        action      TEXT    NOT NULL
     );",
 ];
 

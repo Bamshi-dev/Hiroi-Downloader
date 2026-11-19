@@ -51,6 +51,12 @@ pub enum Command {
     Limit(LimitArgs),
     /// Show live progress of the service's jobs.
     Watch,
+    /// List, start, or hold queues.
+    #[command(subcommand)]
+    Queue(QueueCommand),
+    /// Start or hold queues and limit the speed at set times.
+    #[command(subcommand)]
+    Schedule(ScheduleCommand),
     /// Stop the background service; running jobs continue next time.
     Stop,
 }
@@ -100,6 +106,50 @@ pub struct AddArgs {
     /// Start before other queued jobs.
     #[arg(long)]
     pub high_priority: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum QueueCommand {
+    /// Queues with their state and number of jobs.
+    List,
+    /// Let a queue's jobs run.
+    Start { name: String },
+    /// Hold a queue: its jobs pause and wait until it starts again.
+    Stop { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScheduleCommand {
+    List,
+    /// Add a rule, e.g. `--queue night --from 01:00 --to 07:00 --days weekdays`.
+    Add(ScheduleArgs),
+    Remove {
+        id: i64,
+    },
+}
+
+#[derive(Debug, Args)]
+#[group(id = "action", required = true, multiple = false, args = ["queue", "limit"])]
+pub struct ScheduleArgs {
+    /// Run this queue during the window (or start it at --from).
+    #[arg(long, value_name = "NAME")]
+    pub queue: Option<String>,
+
+    /// Limit the speed of everything during the window, e.g. 1M.
+    #[arg(long, value_name = "RATE", value_parser = parse_rate)]
+    pub limit: Option<u64>,
+
+    /// Start time, HH:MM.
+    #[arg(long, value_name = "HH:MM")]
+    pub from: String,
+
+    /// End time, HH:MM. Without it, the action happens once at --from.
+    #[arg(long, value_name = "HH:MM")]
+    pub to: Option<String>,
+
+    /// Days: daily, weekdays, weekends, or e.g. mon-fri, sat,sun.
+    #[arg(long, value_name = "DAYS", default_value = "daily")]
+    pub days: String,
 }
 
 #[derive(Debug, Args)]

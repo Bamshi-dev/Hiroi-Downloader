@@ -78,6 +78,21 @@ pub enum Request {
         job: Option<JobId>,
         limit: Option<u64>,
     },
+    /// Queues with their state and job counts.
+    Queues,
+    /// Let a queue's jobs run.
+    StartQueue {
+        queue: String,
+    },
+    /// Hold a queue: its running jobs pause and wait; new jobs wait too.
+    StopQueue {
+        queue: String,
+    },
+    Schedules,
+    AddSchedule(Schedule),
+    RemoveSchedule {
+        id: i64,
+    },
     /// Start receiving events on this connection.
     Subscribe,
     /// Pause everything, save, and exit.
@@ -228,8 +243,50 @@ pub enum Response {
     Added { job: JobId },
     Jobs { jobs: Vec<Job> },
     Job { job: Box<Job> },
+    Queues { queues: Vec<QueueInfo> },
+    Schedules { schedules: Vec<Schedule> },
+    ScheduleAdded { id: i64 },
     Done,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueInfo {
+    pub name: String,
+    pub running: bool,
+    pub jobs: usize,
+    /// Jobs not yet completed or cancelled.
+    pub pending: usize,
+}
+
+/// A rule of the scheduler. Times are minutes after local midnight.
+///
+/// With `to_minute`, the rule describes a window: the action holds from
+/// `from_minute` until `to_minute` (a window may cross midnight) and is
+/// undone afterwards. Without it, the action happens once at
+/// `from_minute` and stays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Schedule {
+    /// Assigned by the service.
+    #[serde(default)]
+    pub id: i64,
+    /// Days the rule starts on: bit 0 is Monday, bit 6 Sunday.
+    pub days: u8,
+    pub from_minute: u16,
+    pub to_minute: Option<u16>,
+    pub action: ScheduleAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ScheduleAction {
+    /// Run the queue (during the window).
+    RunQueue { queue: String },
+    /// Limit the speed of everything (during the window).
+    SpeedLimit { limit: u64 },
+}
+
+/// Every day of the week, for [`Schedule::days`].
+pub const EVERY_DAY: u8 = 0b111_1111;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

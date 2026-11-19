@@ -6,10 +6,13 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use hiroi_daemon::Client;
-use hiroi_proto::{Event, Job, JobId, JobStatus, Priority, Request, Response};
+use hiroi_daemon::schedule::{format_days, format_time, parse_days, parse_time};
+use hiroi_proto::{
+    Event, Job, JobId, JobStatus, Priority, Request, Response, Schedule, ScheduleAction,
+};
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 
-use crate::args::{AddArgs, IdsArg, JobsArg, LimitArgs};
+use crate::args::{AddArgs, IdsArg, JobsArg, LimitArgs, QueueCommand, ScheduleCommand};
 use crate::commands::get::collect_urls;
 use crate::options;
 use crate::size::parse_rate;
@@ -229,4 +232,89 @@ fn progress(job: &Job) -> String {
         }
         _ => HumanBytes(job.downloaded).to_string(),
     }
+}
+
+pub async fn queue(client: &mut Client, command: QueueCommand) -> Result<ExitCode> {
+    let request = match command {
+        QueueCommand::List => {
+            let Response::Queues { queues } = client.call(Request::Queues).await? else {
+                bail!("unexpected reply");
+            };
+            println!(
+                "{:<16}  {:<7}  {:>5}  {:>7}",
+                "QUEUE", "STATE", "JOBS", "PENDING"
+            );
+            for queue in queues {
+                let state = if queue.running { "running" } else { "held" };
+                println!(
+                    "{:<16}  {state:<7}  {:>5}  {:>7}",
+                    queue.name, queue.jobs, queue.pending
+                );
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        QueueCommand::Start { name } => Request::StartQueue { queue: name },
+        QueueCommand::Stop { name } => Request::StopQueue { queue: name },
+    };
+    client.call(request).await?;
+    Ok(ExitCode::SUCCESS)
+}
+
+pub async fn schedule(client: &mut Client, command: ScheduleCommand) -> Result<ExitCode> {
+    match command {
+        ScheduleCommand::List => {
+            let Response::Schedules { schedules } = client.call(Request::Schedules).await? else {
+                bail!("unexpected reply");
+            };
+            if schedules.is_empty() {
+                println!("No schedules.");
+            }
+            for rule in schedules {
+                let when = match rule.to_minute {
+                    Some(to) => format!("{}-{}", format_time(rule.from_minute), format_time(to)),
+                    None => format!("at {}", format_time(rule.from_minute)),
+                };
+                let what = match rule.action {
+                    ScheduleAction::RunQueue { queue } => format!("run queue {queue}"),
+                    ScheduleAction::SpeedLimit { limit } => {
+                        format!("limit to {}/s", HumanBytes(limit))
+                    }
+                };
+                println!(
+                    "{:>4}  {:<9}  {:<11}  {what}",
+                    rule.id,
+                    format_days(rule.days),
+                    when
+                );
+            }
+        }
+        ScheduleCommand::Add(args) => {
+            let parse = |text: &str| {
+                parse_time(text).with_context(|| format!("`{text}` is not a time like 07:30"))
+            };
+            let action = match (args.queue, args.limit) {
+                (Some(queue), _) => ScheduleAction::RunQueue { queue },
+                (None, Some(limit)) => ScheduleAction::SpeedLimit { limit },
+                (None, None) => unreachable!("clap requires one of them"),
+            };
+            let schedule = Schedule {
+                id: 0,
+                days: parse_days(&args.days)
+                    .with_context(|| format!("`{}` is not a list of days", args.days))?,
+                from_minute: parse(&args.from)?,
+                to_minute: args.to.as_deref().map(parse).transpose()?,
+                action,
+            };
+            let Response::ScheduleAdded { id } =
+                client.call(Request::AddSchedule(schedule)).await?
+            else {
+                bail!("unexpected reply");
+            };
+            println!("{id}");
+        }
+        ScheduleCommand::Remove { id } => {
+            client.call(Request::RemoveSchedule { id }).await?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }

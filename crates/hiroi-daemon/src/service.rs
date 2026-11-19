@@ -5,7 +5,7 @@
 //! applies it to SQLite. The engine knows nothing about jobs: it sees
 //! downloads, and `Recorder` maps its events back to jobs.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,12 +15,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use hiroi_engine::{
     DownloadId, DownloadListener, DownloadSnapshot, Engine, EngineConfig, EngineError,
 };
-use hiroi_proto::{Event, Job, JobId, JobStatus, NewJob, Request, Response};
+use hiroi_proto::{
+    Event, Job, JobId, JobStatus, NewJob, QueueInfo, Request, Response, Schedule, ScheduleAction,
+};
 use hiroi_store::{InsertJob, JobUpdate, Store, StoreError, StoredJob};
 use parking_lot::Mutex;
 use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
+use crate::schedule::{self, Desired, Moment};
 use crate::{convert, paths, server};
 
 /// How often the progress of running jobs is written to the database.
@@ -118,6 +121,7 @@ pub(crate) struct Service {
     /// Set while the service pauses everything to exit. Those pauses
     /// are not the user's: the jobs must start again on the next run.
     stopping: AtomicBool,
+    schedules_changed: Arc<Notify>,
 }
 
 #[derive(Default)]
@@ -125,12 +129,23 @@ struct State {
     rows: BTreeMap<JobId, StoredJob>,
     loaded: HashMap<JobId, DownloadId>,
     jobs_of: HashMap<DownloadId, JobId>,
+    /// Queues that are held.
+    stopped: HashSet<String>,
+    /// Jobs paused because their queue is held, not by the user.
+    held: HashSet<JobId>,
+    schedules: Vec<Schedule>,
+    /// What the window rules wanted at the last check.
+    last_desired: Option<Desired>,
+    /// The speed limit set by the user; windows may lower it for a while.
+    base_limit: Option<u64>,
 }
 
 enum Write {
     Update(JobId, JobUpdate),
     Delete(JobId),
     Setting(String, String),
+    /// Queue name and whether it is held.
+    Queue(String, bool),
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
@@ -153,12 +168,17 @@ impl Service {
             store: Arc::clone(&store),
             shutdown: Notify::new(),
             stopping: AtomicBool::new(false),
+            schedules_changed: Arc::new(Notify::new()),
         });
         service.engine.add_listener(Arc::new(Recorder {
             service: Arc::downgrade(&service),
         }));
         service.restore().await?;
         tokio::spawn(save_progress_loop(Arc::downgrade(&service)));
+        tokio::spawn(schedule_loop(
+            Arc::downgrade(&service),
+            Arc::clone(&service.schedules_changed),
+        ));
         Ok(service)
     }
 
@@ -166,13 +186,23 @@ impl Service {
     /// paused and failed ones without starting.
     async fn restore(&self) -> Result<(), DaemonError> {
         let store = Arc::clone(&self.store);
-        let (rows, limit) = tokio::task::spawn_blocking(move || {
-            Ok::<_, StoreError>((store.jobs()?, store.setting(GLOBAL_LIMIT_KEY)?))
+        let (rows, limit, stopped, schedules) = tokio::task::spawn_blocking(move || {
+            Ok::<_, StoreError>((
+                store.jobs()?,
+                store.setting(GLOBAL_LIMIT_KEY)?,
+                store.stopped_queues()?,
+                store.schedules()?,
+            ))
         })
         .await
         .expect("store task panicked")?;
-        if let Some(limit) = limit.and_then(|value| value.parse().ok()) {
-            self.engine.set_global_speed_limit(Some(limit));
+        let limit = limit.and_then(|value| value.parse().ok());
+        self.engine.set_global_speed_limit(limit);
+        {
+            let mut state = self.state.lock();
+            state.base_limit = limit;
+            state.stopped = stopped.into_iter().collect();
+            state.schedules = schedules;
         }
         for row in rows {
             let id = row.id;
@@ -202,12 +232,19 @@ impl Service {
                 return;
             }
         };
-        let download = if start {
+        // A job of a held queue waits; it starts with its queue.
+        let held = start && self.state.lock().stopped.contains(&row.queue);
+        // The engine reports some changes synchronously, and the listener
+        // takes the state lock: never call the engine while holding it.
+        let download = if start && !held {
             self.engine.add(request)
         } else {
             self.engine.add_paused(request)
         };
         let mut state = self.state.lock();
+        if held {
+            state.held.insert(row.id);
+        }
         state.loaded.insert(row.id, download);
         state.jobs_of.insert(download, row.id);
     }
@@ -245,6 +282,25 @@ impl Service {
             Request::Cancel { job } => self.cancel(job).map(done),
             Request::Remove { job } => self.remove(job).map(done),
             Request::SetSpeedLimit { job, limit } => self.set_speed_limit(job, limit).map(done),
+            Request::Queues => Ok(Response::Queues {
+                queues: self.queues(),
+            }),
+            Request::StartQueue { queue } => {
+                self.set_queue_running(&queue, true);
+                Ok(Response::Done)
+            }
+            Request::StopQueue { queue } => {
+                self.set_queue_running(&queue, false);
+                Ok(Response::Done)
+            }
+            Request::Schedules => Ok(Response::Schedules {
+                schedules: self.state.lock().schedules.clone(),
+            }),
+            Request::AddSchedule(schedule) => self
+                .add_schedule(schedule)
+                .await
+                .map(|id| Response::ScheduleAdded { id }),
+            Request::RemoveSchedule { id } => self.remove_schedule(id).await.map(done),
             // The server answers these itself.
             Request::Subscribe => Ok(Response::Done),
             Request::Shutdown => {
@@ -331,7 +387,12 @@ impl Service {
             .loaded
             .get(&row.id)
             .and_then(|&download| self.engine.snapshot(download));
-        convert::job(row, live.as_ref())
+        let mut job = convert::job(row, live.as_ref());
+        // The engine holds a waiting job paused; to the user it is queued.
+        if state.held.contains(&row.id) && job.status == JobStatus::Paused {
+            job.status = JobStatus::Queued;
+        }
+        job
     }
 
     fn loaded_jobs(&self) -> Vec<JobId> {
@@ -392,12 +453,15 @@ impl Service {
                 "job {id} is still running; pause or cancel it first"
             ));
         }
-        if let Some(download) = state.loaded.remove(&id) {
+        let download = state.loaded.remove(&id);
+        if let Some(download) = download {
             state.jobs_of.remove(&download);
-            self.engine.remove(download);
         }
         state.rows.remove(&id);
         drop(state);
+        if let Some(download) = download {
+            self.engine.remove(download);
+        }
         let _ = self.writes.send(Write::Delete(id));
         let _ = self.events.send(Event::Removed { job: id });
         Ok(())
@@ -406,7 +470,16 @@ impl Service {
     fn set_speed_limit(&self, job: Option<JobId>, limit: Option<u64>) -> Result<(), String> {
         match job {
             None => {
-                self.engine.set_global_speed_limit(limit);
+                let window = {
+                    let mut state = self.state.lock();
+                    state.base_limit = limit;
+                    state
+                        .last_desired
+                        .as_ref()
+                        .and_then(|desired| desired.limit)
+                };
+                // An active speed window keeps its lower limit until it ends.
+                self.engine.set_global_speed_limit(lowest(limit, window));
                 let value = limit.map(|l| l.to_string()).unwrap_or_default();
                 let _ = self
                     .writes
@@ -417,6 +490,158 @@ impl Service {
                 let download = self.download_of(id)?;
                 self.engine.set_speed_limit(download, limit);
                 Ok(())
+            }
+        }
+    }
+
+    fn queues(&self) -> Vec<QueueInfo> {
+        let state = self.state.lock();
+        let mut names: BTreeSet<String> =
+            state.rows.values().map(|row| row.queue.clone()).collect();
+        names.extend(state.stopped.iter().cloned());
+        names.insert(DEFAULT_QUEUE.to_string());
+        for schedule in &state.schedules {
+            if let ScheduleAction::RunQueue { queue } = &schedule.action {
+                names.insert(queue.clone());
+            }
+        }
+        names
+            .into_iter()
+            .map(|name| {
+                let jobs: Vec<_> = state
+                    .rows
+                    .values()
+                    .filter(|row| row.queue == name)
+                    .collect();
+                let pending = jobs
+                    .iter()
+                    .filter(|row| {
+                        !matches!(row.status, JobStatus::Completed | JobStatus::Cancelled)
+                    })
+                    .count();
+                QueueInfo {
+                    running: !state.stopped.contains(&name),
+                    jobs: jobs.len(),
+                    pending,
+                    name,
+                }
+            })
+            .collect()
+    }
+
+    /// Holds or releases a queue. Holding pauses its active jobs and
+    /// remembers them; releasing resumes exactly those.
+    fn set_queue_running(&self, queue: &str, running: bool) {
+        let mut state = self.state.lock();
+        let changed = if running {
+            state.stopped.remove(queue)
+        } else {
+            state.stopped.insert(queue.to_string())
+        };
+        if !changed {
+            return;
+        }
+        let members: Vec<(JobId, DownloadId)> = state
+            .loaded
+            .iter()
+            .filter(|(id, _)| state.rows.get(id).is_some_and(|row| row.queue == queue))
+            .map(|(&id, &download)| (id, download))
+            .collect();
+        let mut affected = Vec::new();
+        for (id, download) in members {
+            if running {
+                if state.held.remove(&id) {
+                    affected.push(download);
+                }
+            } else {
+                let active = self
+                    .engine
+                    .snapshot(download)
+                    .is_some_and(|s| !s.status.is_settled());
+                if active {
+                    state.held.insert(id);
+                    affected.push(download);
+                }
+            }
+        }
+        // Engine calls happen after the lock is released (see `load`).
+        drop(state);
+        for download in affected {
+            if running {
+                self.engine.resume(download);
+            } else {
+                self.engine.pause(download);
+            }
+        }
+        tracing::info!(queue, running, "queue changed");
+        let _ = self.writes.send(Write::Queue(queue.to_string(), !running));
+    }
+
+    async fn add_schedule(&self, mut schedule: Schedule) -> Result<i64, String> {
+        let valid_time = |minute: u16| minute < 24 * 60;
+        if schedule.days == 0
+            || !valid_time(schedule.from_minute)
+            || !schedule.to_minute.is_none_or(valid_time)
+        {
+            return Err(
+                "a schedule needs at least one day and times between 00:00 and 23:59".into(),
+            );
+        }
+        let store = Arc::clone(&self.store);
+        let stored = schedule.clone();
+        let id = tokio::task::spawn_blocking(move || store.insert_schedule(&stored))
+            .await
+            .expect("store task panicked")
+            .map_err(|e| e.to_string())?;
+        schedule.id = id;
+        self.state.lock().schedules.push(schedule);
+        self.schedules_changed.notify_one();
+        Ok(id)
+    }
+
+    async fn remove_schedule(&self, id: i64) -> Result<(), String> {
+        let store = Arc::clone(&self.store);
+        let deleted = tokio::task::spawn_blocking(move || store.delete_schedule(id))
+            .await
+            .expect("store task panicked")
+            .map_err(|e| e.to_string())?;
+        if !deleted {
+            return Err(format!("no schedule {id}"));
+        }
+        self.state
+            .lock()
+            .schedules
+            .retain(|schedule| schedule.id != id);
+        self.schedules_changed.notify_one();
+        Ok(())
+    }
+
+    /// Applies the scheduler rules for `at`: window rules when what they
+    /// want changed since the last check, one-shot rules on their minute.
+    fn run_schedules(&self, at: Moment) {
+        let (desired, previous, firing, base) = {
+            let mut state = self.state.lock();
+            let desired = schedule::desired(&state.schedules, at);
+            let previous = state.last_desired.replace(desired.clone());
+            let firing: Vec<Schedule> = schedule::firing(&state.schedules, at).cloned().collect();
+            (desired, previous, firing, state.base_limit)
+        };
+        for (queue, &run) in &desired.queues {
+            let before = previous.as_ref().and_then(|p| p.queues.get(queue).copied());
+            if before != Some(run) {
+                self.set_queue_running(queue, run);
+            }
+        }
+        if previous.as_ref().map(|p| p.limit) != Some(desired.limit) {
+            self.engine
+                .set_global_speed_limit(lowest(base, desired.limit));
+        }
+        for rule in firing {
+            match rule.action {
+                ScheduleAction::RunQueue { queue } => self.set_queue_running(&queue, true),
+                ScheduleAction::SpeedLimit { limit } => {
+                    let _ = self.set_speed_limit(None, Some(limit));
+                }
             }
         }
     }
@@ -478,6 +703,19 @@ impl Service {
             .is_some_and(|row| row.status == JobStatus::Failed);
         // A restored failed job sits paused in the engine; it stays failed.
         if status == JobStatus::Paused && stored_failed {
+            return;
+        }
+        // A job held by its queue waits; it is not paused by the user.
+        let held = self.state.lock().held.contains(&id);
+        if status == JobStatus::Paused && held {
+            self.update(
+                id,
+                JobUpdate {
+                    status: Some(JobStatus::Queued),
+                    downloaded: Some(snapshot.downloaded),
+                    ..JobUpdate::default()
+                },
+            );
             return;
         }
         // Keep the status a job had before the shutdown pause, but save
@@ -591,6 +829,7 @@ async fn write_loop(store: Arc<Store>, mut queue: mpsc::UnboundedReceiver<Write>
             Write::Update(id, update) => store.update_job(id, &update).map(|()| None),
             Write::Delete(id) => store.delete_job(id).map(|_| None),
             Write::Setting(key, value) => store.set_setting(&key, &value).map(|()| None),
+            Write::Queue(name, stopped) => store.set_queue_stopped(&name, stopped).map(|()| None),
             Write::Flush(done) => Ok(Some(done)),
         })
         .await;
@@ -614,6 +853,33 @@ async fn save_progress_loop(service: Weak<Service>) {
             return;
         };
         service.save_progress();
+    }
+}
+
+/// Checks the rules at every minute boundary and whenever they change.
+async fn schedule_loop(service: Weak<Service>, changed: Arc<Notify>) {
+    loop {
+        let Some(strong) = service.upgrade() else {
+            return;
+        };
+        strong.run_schedules(Moment::now());
+        drop(strong);
+        let seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        // Time zones are whole minutes, so UTC and local minutes start together.
+        let until_next_minute = Duration::from_secs(60 - seconds % 60) + Duration::from_millis(50);
+        tokio::select! {
+            () = tokio::time::sleep(until_next_minute) => {}
+            () = changed.notified() => {}
+        }
+    }
+}
+
+fn lowest(a: Option<u64>, b: Option<u64>) -> Option<u64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
     }
 }
 

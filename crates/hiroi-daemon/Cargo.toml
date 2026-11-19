@@ -13,6 +13,7 @@ parking_lot.workspace = true
 hiroi-engine.workspace = true
 hiroi-proto.workspace = true
 hiroi-store.workspace = true
+jiff.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

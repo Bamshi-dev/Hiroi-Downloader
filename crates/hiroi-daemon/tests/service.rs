@@ -250,3 +250,103 @@ async fn running_jobs_cannot_be_removed_and_errors_are_clear() {
         .await;
     assert!(bad.unwrap_err().to_string().contains("scheme"));
 }
+
+#[tokio::test]
+async fn held_queues_wait_and_schedules_release_them() {
+    use hiroi_daemon::schedule::Moment;
+    use hiroi_proto::{EVERY_DAY, Schedule, ScheduleAction};
+
+    let server = TestServer::start(Behavior::default()).await;
+    server.put("n.bin", content(512 * 1024, 5));
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+
+    client
+        .call(Request::StopQueue {
+            queue: "night".into(),
+        })
+        .await
+        .unwrap();
+    let job_in_night = NewJob {
+        url: server.url("n.bin"),
+        queue: Some("night".into()),
+        ..NewJob::default()
+    };
+    let id = add(&mut client, job_in_night).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        job(&mut client, id).await.status,
+        JobStatus::Queued,
+        "a held queue's job waits"
+    );
+    assert_eq!(server.requests(), 0, "and sends no request");
+
+    // A window that covers the current minute starts the queue.
+    let now = Moment::now();
+    let rule = Schedule {
+        id: 0,
+        days: EVERY_DAY,
+        from_minute: now.minute,
+        to_minute: Some((now.minute + 2) % (24 * 60)),
+        action: ScheduleAction::RunQueue {
+            queue: "night".into(),
+        },
+    };
+    client.call(Request::AddSchedule(rule)).await.unwrap();
+    wait_for(&mut client, id, JobStatus::Completed).await;
+
+    let Response::Queues { queues } = client.call(Request::Queues).await.unwrap() else {
+        panic!()
+    };
+    let night = queues.iter().find(|queue| queue.name == "night").unwrap();
+    assert!(night.running);
+    assert_eq!((night.jobs, night.pending), (1, 0));
+}
+
+#[tokio::test]
+async fn holding_a_queue_pauses_its_jobs_and_survives_restarts() {
+    let behavior = Behavior {
+        bytes_per_sec: Some(128 * 1024),
+        ..Behavior::default()
+    };
+    let server = TestServer::start(behavior).await;
+    server.put("h.bin", content(1024 * 1024, 6));
+    let fixture = Fixture::new();
+    let (service, mut client) = fixture.start().await;
+
+    let id = add(
+        &mut client,
+        NewJob {
+            url: server.url("h.bin"),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    wait_for(&mut client, id, JobStatus::Downloading).await;
+    client
+        .call(Request::StopQueue {
+            queue: "main".into(),
+        })
+        .await
+        .unwrap();
+    wait_for(&mut client, id, JobStatus::Queued).await;
+
+    client.call(Request::Shutdown).await.unwrap();
+    service.await.unwrap().unwrap();
+    server.set_behavior(Behavior::default());
+    let (_service, mut client) = fixture.start().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        job(&mut client, id).await.status,
+        JobStatus::Queued,
+        "still held after a restart"
+    );
+
+    client
+        .call(Request::StartQueue {
+            queue: "main".into(),
+        })
+        .await
+        .unwrap();
+    wait_for(&mut client, id, JobStatus::Completed).await;
+}

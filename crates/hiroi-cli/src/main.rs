@@ -46,6 +46,8 @@ async fn client_command(
         Command::Remove(args) => jobs::cancel_or_remove(&mut client, args, true).await,
         Command::Limit(args) => jobs::limit(&mut client, args).await,
         Command::Watch => jobs::watch(&mut client).await,
+        Command::Queue(command) => jobs::queue(&mut client, command).await,
+        Command::Schedule(command) => jobs::schedule(&mut client, command).await,
         Command::Stop => jobs::stop(&mut client).await,
         Command::Get(_) | Command::Info(_) | Command::Daemon(_) => unreachable!("handled in main"),
     }
