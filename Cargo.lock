@@ -519,10 +519,10 @@ dependencies = [
 name = "hiroi-engine"
 version = "0.1.0"
 dependencies = [
- "axum",
  "fastrand",
  "futures-util",
  "hex",
+ "hiroi-testserver",
  "httpdate",
  "md-5",
  "parking_lot",
@@ -538,6 +538,16 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "hiroi-testserver"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "fastrand",
+ "futures-util",
+ "tokio",
 ]
 
 [[package]]

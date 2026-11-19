@@ -1,6 +1,6 @@
-//! An HTTP file server for tests that can misbehave on purpose.
-
-#![allow(dead_code)]
+//! An HTTP file server for tests and benchmarks that can misbehave on
+//! purpose: it throttles, drops connections, answers 429, changes files
+//! while they are being downloaded, and sends hostile headers.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -43,12 +43,13 @@ impl Default for Behavior {
     }
 }
 
+#[derive(Debug)]
 pub struct TestServer {
     base: String,
     state: Arc<ServerState>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ServerState {
     files: Mutex<HashMap<String, FileEntry>>,
     behavior: Mutex<Behavior>,
@@ -56,13 +57,15 @@ struct ServerState {
     peak: AtomicUsize,
     served: AtomicU64,
     throttled: AtomicUsize,
+    requests: AtomicUsize,
     versions: AtomicU64,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 struct FileEntry {
     data: Bytes,
     etag: String,
+    content_type: &'static str,
 }
 
 impl TestServer {
@@ -80,9 +83,17 @@ impl TestServer {
 
     /// Adds or replaces a file. Every version gets a new ETag.
     pub fn put(&self, name: &str, data: Vec<u8>) {
+        self.put_typed(name, data, "application/octet-stream");
+    }
+
+    /// Like [`Self::put`], with an explicit `Content-Type`.
+    pub fn put_typed(&self, name: &str, data: impl Into<Vec<u8>>, content_type: &'static str) {
+        let data = data.into();
         let version = self.state.versions.fetch_add(1, Ordering::Relaxed);
+        let etag = format!("\"v{version}-{}\"", data.len());
         let entry = FileEntry {
-            etag: format!("\"v{version}-{}\"", data.len()),
+            etag,
+            content_type,
             data: data.into(),
         };
         self.state
@@ -90,6 +101,20 @@ impl TestServer {
             .lock()
             .unwrap()
             .insert(name.to_string(), entry);
+    }
+
+    /// Removes a file; later requests get 404.
+    pub fn remove(&self, name: &str) {
+        self.state.files.lock().unwrap().remove(name);
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base
+    }
+
+    /// Number of requests answered so far.
+    pub fn requests(&self) -> usize {
+        self.state.requests.load(Ordering::Relaxed)
     }
 
     pub fn url(&self, name: &str) -> String {
@@ -132,6 +157,7 @@ async fn serve(
     Path(name): Path<String>,
     headers: HeaderMap,
 ) -> Response {
+    state.requests.fetch_add(1, Ordering::Relaxed);
     let behavior = state.behavior.lock().unwrap().clone();
     let Some(file) = state.files.lock().unwrap().get(&name).cloned() else {
         return empty(StatusCode::NOT_FOUND);
@@ -159,10 +185,11 @@ async fn serve(
         .filter(|_| behavior.ranges && if_range_ok)
         .and_then(parse_range);
 
-    let mut response = Response::builder().header(header::ETAG, &file.etag).header(
-        header::ACCEPT_RANGES,
-        if behavior.ranges { "bytes" } else { "none" },
-    );
+    let accept_ranges = if behavior.ranges { "bytes" } else { "none" };
+    let mut response = Response::builder()
+        .header(header::ETAG, &file.etag)
+        .header(header::CONTENT_TYPE, file.content_type)
+        .header(header::ACCEPT_RANGES, accept_ranges);
     if let Some(disposition) = &behavior.content_disposition {
         response = response.header(header::CONTENT_DISPOSITION, disposition);
     }

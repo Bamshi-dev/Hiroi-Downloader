@@ -1,7 +1,5 @@
 //! End-to-end tests against a local server.
 
-mod support;
-
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,7 +9,7 @@ use hiroi_engine::{
     Checksum, DownloadListener, DownloadRequest, DownloadSnapshot, DownloadStatus, Engine,
     EngineConfig, RetryPolicy,
 };
-use support::{Behavior, TestServer, content};
+use hiroi_testserver::{Behavior, TestServer, content};
 
 const KIB: usize = 1024;
 const MIB: usize = 1024 * KIB;

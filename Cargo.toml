@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/hiroi-engine", "crates/hiroi-cli"]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 hiroi-engine = { path = "crates/hiroi-engine" }
+hiroi-testserver = { path = "crates/hiroi-testserver" }
 
 anyhow = "1"
 axum = "0.8"
