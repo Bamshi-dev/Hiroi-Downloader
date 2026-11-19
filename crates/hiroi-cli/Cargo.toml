@@ -1,0 +1,22 @@
+[package]
+name = "hiroi-cli"
+description = "Command-line front end of Hiroi Downloader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hiroi"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+hiroi-engine.workspace = true
+indicatif.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

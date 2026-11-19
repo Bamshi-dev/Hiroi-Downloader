@@ -1,0 +1,156 @@
+//! Multi-connection download of a file whose server supports ranges.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use tokio::task::JoinSet;
+use tokio::time::{MissedTickBehavior, interval};
+use tokio_util::sync::CancellationToken;
+
+use super::meter::SpeedMeter;
+use super::segments::SegmentTable;
+use super::{TaskContext, worker};
+use crate::error::{EngineError, Result};
+use crate::net::source::SourcePool;
+use crate::storage::control::ControlFile;
+use crate::storage::file::OutputFile;
+use crate::storage::plan::Plan;
+
+/// Everything the connections of one download share.
+#[derive(Debug)]
+pub(super) struct Transfer {
+    pub id: crate::snapshot::DownloadId,
+    pub ctx: Arc<TaskContext>,
+    pub pool: Arc<SourcePool>,
+    pub table: SegmentTable,
+    pub file: OutputFile,
+    pub total_size: u64,
+    pub active: AtomicUsize,
+    /// Child of the task's token: also cancelled when one connection fails
+    /// for good, so the others stop too.
+    pub cancel: CancellationToken,
+}
+
+pub(super) async fn download(
+    ctx: &Arc<TaskContext>,
+    pool: Arc<SourcePool>,
+    total_size: u64,
+    plan: &Plan,
+) -> Result<()> {
+    let config = &ctx.shared.config;
+    let connections = ctx
+        .request
+        .connections
+        .unwrap_or(config.default_connections);
+    let table = match &plan.resume {
+        Some(control) => SegmentTable::restore(&control.segments, config.min_split_size),
+        None => SegmentTable::new(total_size, connections, config.min_split_size),
+    };
+    let file = OutputFile::open(&plan.paths.part_path, plan.resume.is_none())?;
+    file.reserve(total_size, config.preallocate)?;
+
+    let control = ControlFile::new(
+        pool.key(),
+        total_size,
+        pool.primary().validator().map(str::to_string),
+    );
+    let transfer = Arc::new(Transfer {
+        id: ctx.id,
+        ctx: Arc::clone(ctx),
+        pool,
+        table,
+        file,
+        total_size,
+        active: AtomicUsize::new(0),
+        cancel: ctx.cancel.child_token(),
+    });
+    // Save the starting layout right away, so even an early crash resumes.
+    checkpoint(&transfer, &control, plan).await?;
+
+    let mut workers = JoinSet::new();
+    for _ in 0..connections {
+        workers.spawn(worker::run(Arc::clone(&transfer)));
+    }
+    let result = supervise(&transfer, &mut workers, &control, plan).await;
+    let saved = checkpoint(&transfer, &control, plan).await;
+    report(&transfer, &mut SpeedMeter::new(transfer.table.received()));
+    result.and(saved)?;
+
+    if transfer.table.written() != total_size {
+        return Err(EngineError::Protocol(
+            "transfer ended with missing data".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Waits for the connections while reporting progress and saving
+/// checkpoints. Returns the first real error, if any.
+async fn supervise(
+    transfer: &Arc<Transfer>,
+    workers: &mut JoinSet<Result<()>>,
+    control: &ControlFile,
+    plan: &Plan,
+) -> Result<()> {
+    let config = &transfer.ctx.shared.config;
+    let mut progress_tick = interval(config.progress_interval);
+    let mut checkpoint_tick = interval(config.checkpoint_interval);
+    progress_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    checkpoint_tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut meter = SpeedMeter::new(transfer.table.received());
+    let mut failure: Option<EngineError> = None;
+
+    loop {
+        tokio::select! {
+            joined = workers.join_next() => match joined {
+                None => break,
+                Some(Ok(Ok(()) | Err(EngineError::Cancelled))) => {}
+                Some(Ok(Err(error))) => {
+                    if failure.is_none() {
+                        failure = Some(error);
+                        transfer.cancel.cancel();
+                    }
+                }
+                Some(Err(join_error)) => std::panic::resume_unwind(join_error.into_panic()),
+            },
+            _ = progress_tick.tick() => report(transfer, &mut meter),
+            _ = checkpoint_tick.tick() => {
+                if let Err(error) = checkpoint(transfer, control, plan).await {
+                    failure.get_or_insert(error);
+                    transfer.cancel.cancel();
+                }
+            }
+        }
+    }
+
+    match failure {
+        Some(error) => Err(error),
+        None if transfer.ctx.cancel.is_cancelled() => Err(EngineError::Cancelled),
+        None => Ok(()),
+    }
+}
+
+/// Flushes data to disk first, then records it in the control file.
+async fn checkpoint(transfer: &Transfer, control: &ControlFile, plan: &Plan) -> Result<()> {
+    transfer.file.sync().await?;
+    let mut control = control.clone();
+    control.segments = transfer.table.saved();
+    let path = &plan.paths.control_path;
+    control.save(path).map_err(|e| EngineError::io(path, e))
+}
+
+fn report(transfer: &Transfer, meter: &mut SpeedMeter) {
+    let downloaded = transfer.table.received();
+    let speed = meter.sample(downloaded);
+    let eta = meter.eta(transfer.total_size.saturating_sub(downloaded));
+    let connections = transfer.active.load(Ordering::Relaxed);
+    let segments = transfer.table.snapshot();
+    transfer.ctx.progress.update(|p| {
+        p.downloaded = downloaded;
+        p.speed = speed;
+        p.eta = eta;
+        p.connections = connections;
+        p.segments = segments;
+    });
+    transfer.ctx.observer.progress(transfer.id);
+}

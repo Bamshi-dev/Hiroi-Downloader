@@ -1,0 +1,28 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Downloads left behind while testing
+*.hiroi-part
+*.hiroi-state
+*.hiroi-state.tmp
+
+# JetBrains (RustRover)
+/.idea/
+*.iml
+
+# VS Code
+/.vscode/
+
+# Editors
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and local environment
+*.log
+.env
