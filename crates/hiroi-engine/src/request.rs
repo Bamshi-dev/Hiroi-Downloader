@@ -235,6 +235,8 @@ const SCHEMES: &[&str] = &[
     "ftps",
     #[cfg(feature = "sftp")]
     "sftp",
+    #[cfg(feature = "torrent")]
+    "magnet",
 ];
 
 pub(crate) fn is_supported(scheme: &str) -> bool {
@@ -257,6 +259,8 @@ fn parse_url(url: &str) -> Result<Url> {
         scheme if !is_supported(scheme) => {
             Err(EngineError::UnsupportedScheme(parsed.scheme().to_string()))
         }
+        // A magnet link names a torrent, not a server.
+        "magnet" => Ok(parsed),
         _ if parsed.host().is_none() => Err(EngineError::InvalidUrl(url.to_string())),
         _ => Ok(parsed),
     }

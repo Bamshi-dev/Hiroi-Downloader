@@ -39,6 +39,9 @@ pub(crate) struct EngineShared {
     pub hosts: HostLimiter,
     pub connections: Semaphore,
     pub global_rate: RateLimiter,
+    /// The BitTorrent session, started by the first torrent.
+    #[cfg(feature = "torrent")]
+    pub torrents: crate::torrent::Torrents,
 }
 
 /// How a task reports back to the engine.
@@ -118,6 +121,11 @@ pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     if ctx.request.stream.extract {
         return media::extract::download(&ctx).await;
     }
+    #[cfg(feature = "torrent")]
+    if ctx.request.url().scheme() == "magnet" {
+        let link = ctx.request.url().to_string();
+        return crate::torrent::download(&ctx, crate::torrent::Source::Magnet(link)).await;
+    }
     let on_retry = |reason: &str, delay| ctx.observer.retrying(ctx.id, reason, delay);
     let results = inspect::probe_all(&ctx.shared, &ctx.request, &ctx.cancel, &on_retry).await;
     let (pool, remote) = inspect::select(&ctx.request, results)?;
@@ -126,6 +134,11 @@ pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     }
     if !ctx.request.derived && metalink::detect(&remote) {
         return metalink::download(&ctx, &remote.final_url).await;
+    }
+    #[cfg(feature = "torrent")]
+    if !ctx.request.derived && crate::torrent::detect(&remote) {
+        let file = crate::torrent::fetch_file(&ctx, &remote.final_url).await?;
+        return crate::torrent::download(&ctx, file).await;
     }
     download_file(&ctx, pool, remote).await
 }

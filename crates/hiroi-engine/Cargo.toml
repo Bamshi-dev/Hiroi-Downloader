@@ -14,6 +14,7 @@ fastrand.workspace = true
 futures-util.workspace = true
 hex.workspace = true
 httpdate.workspace = true
+librqbit = { workspace = true, optional = true }
 md-5.workspace = true
 parking_lot.workspace = true
 percent-encoding.workspace = true
@@ -38,6 +39,8 @@ tracing.workspace = true
 ftp = ["dep:suppaftp", "dep:tokio-rustls", "dep:rustls-platform-verifier"]
 # SFTP sources, checked against known_hosts. Off by default.
 sftp = ["dep:russh", "dep:russh-sftp"]
+# BitTorrent and magnet links. Peers see the address you download from.
+torrent = ["dep:librqbit"]
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

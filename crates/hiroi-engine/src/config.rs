@@ -46,6 +46,9 @@ pub struct EngineConfig {
     /// known_hosts file that SFTP servers are checked against;
     /// `~/.ssh/known_hosts` when `None`.
     pub ssh_known_hosts: Option<PathBuf>,
+    /// Find torrent peers through the DHT. Magnet links rarely work
+    /// without it.
+    pub torrent_dht: bool,
 }
 
 impl Default for EngineConfig {
@@ -71,6 +74,7 @@ impl Default for EngineConfig {
             progress_interval: constants::PROGRESS_INTERVAL,
             yt_dlp: PathBuf::from("yt-dlp"),
             ssh_known_hosts: None,
+            torrent_dht: true,
         }
     }
 }

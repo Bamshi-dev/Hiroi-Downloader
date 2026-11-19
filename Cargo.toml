@@ -30,6 +30,8 @@ hex = "0.4"
 httpdate = "1"
 indicatif = "0.18"
 jiff = "1"
+# Only with the `torrent` feature.
+librqbit = { version = "9", default-features = false, features = ["rust-tls"] }
 lol_html = "3"
 md-5 = "0.11"
 parking_lot = "0.12"

@@ -65,6 +65,8 @@ impl Engine {
             hosts: HostLimiter::new(config.max_connections_per_host),
             connections: Semaphore::new(config.max_total_connections),
             global_rate: RateLimiter::new(config.global_speed_limit),
+            #[cfg(feature = "torrent")]
+            torrents: crate::torrent::Torrents::default(),
             config,
         };
         let inner = EngineInner {

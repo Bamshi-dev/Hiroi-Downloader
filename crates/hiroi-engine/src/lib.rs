@@ -40,6 +40,8 @@ mod request;
 mod snapshot;
 mod storage;
 mod task;
+#[cfg(feature = "torrent")]
+mod torrent;
 mod xml;
 
 pub use checksum::{Checksum, HashAlgorithm};
