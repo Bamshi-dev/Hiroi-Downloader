@@ -71,11 +71,11 @@ options) in the run configuration.
 ## Usage
 
 ```sh
-hiroi https://example.com/big.iso                      # 8 connections
-hiroi https://example.com/big.iso -c 16 -l 5M          # 16 connections, 5 MiB/s
-hiroi https://example.com/big.iso -m https://mirror.example.org/big.iso
-hiroi https://example.com/big.iso --checksum sha256:<hex>
-hiroi -i urls.txt -j 3 -d ~/Downloads                  # a list, 3 at a time
+hiroi get https://example.com/big.iso                      # 8 connections
+hiroi get https://example.com/big.iso -c 16 -l 5M          # 16 connections, 5 MiB/s
+hiroi get https://example.com/big.iso -m https://mirror.example.org/big.iso
+hiroi get https://example.com/big.iso --checksum sha256:<hex>
+hiroi get -i urls.txt -j 3 -d ~/Downloads                  # a list, 3 at a time
 hiroi --help
 ```
 

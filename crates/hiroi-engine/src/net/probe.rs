@@ -1,8 +1,8 @@
 use std::time::{Duration, SystemTime};
 
 use reqwest::header::{
-    CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, ETAG, HeaderMap, LAST_MODIFIED, RANGE,
-    RETRY_AFTER,
+    CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HeaderMap,
+    LAST_MODIFIED, RANGE, RETRY_AFTER,
 };
 use reqwest::{Client, Response, StatusCode, Url};
 
@@ -22,6 +22,7 @@ pub(crate) struct RemoteFile {
     pub file_name: Option<String>,
     /// `ETag` or `Last-Modified`, used to notice when the file changes.
     pub validator: Option<String>,
+    pub content_type: Option<String>,
 }
 
 /// Asks for the first byte only. A server that supports ranges answers 206
@@ -94,12 +95,14 @@ fn describe(response: &Response, size: Option<u64>, ranges: bool) -> RemoteFile 
     let validator = header(response, ETAG.as_str())
         .filter(|etag| !headers::is_weak_etag(etag))
         .or_else(|| header(response, LAST_MODIFIED.as_str()));
+    let content_type = header(response, CONTENT_TYPE.as_str());
     RemoteFile {
         final_url,
         size,
         ranges,
         file_name,
         validator,
+        content_type,
     }
 }
 

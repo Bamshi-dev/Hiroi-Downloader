@@ -12,17 +12,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use reqwest::{Client, Url};
+use reqwest::Client;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::EngineConfig;
 use crate::error::{EngineError, Result};
+use crate::inspect;
 use crate::limit::{HostLimiter, RateLimiter};
-use crate::net::display_url;
-use crate::net::probe::{self, RemoteFile};
-use crate::net::retry::{FetchError, RetryAction, is_throttle};
-use crate::net::source::{Source, SourcePool};
 use crate::request::{ConflictPolicy, DownloadRequest};
 use crate::snapshot::{DownloadId, DownloadStatus, SegmentSnapshot};
 use crate::storage::file::{self, OutputFile};
@@ -96,7 +93,9 @@ impl TaskProgress {
 pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     ctx.observer
         .status_changed(ctx.id, DownloadStatus::Connecting);
-    let (pool, remote) = probe_sources(&ctx).await?;
+    let on_retry = |reason: &str, delay| ctx.observer.retrying(ctx.id, reason, delay);
+    let results = inspect::probe_all(&ctx.shared, &ctx.request, &ctx.cancel, &on_retry).await;
+    let (pool, remote) = inspect::select(&ctx.request, results)?;
     let plan = plan::prepare(&ctx.request, &remote, &pool.key())?;
     let segmented = remote.ranges && remote.size.is_some_and(|size| size > 0);
 
@@ -151,79 +150,6 @@ pub(crate) fn discard(paths: &DownloadPaths) {
     for path in [&paths.part_path, &paths.control_path] {
         if let Err(error) = remove_if_exists(path) {
             tracing::warn!(path = %path.display(), %error, "could not remove temporary file");
-        }
-    }
-}
-
-/// Probes all sources at once. The first one that answers defines the file;
-/// mirrors that disagree on size or range support are left out.
-async fn probe_sources(ctx: &TaskContext) -> Result<(SourcePool, RemoteFile)> {
-    let probes = ctx
-        .request
-        .sources
-        .iter()
-        .map(|url| probe_with_retry(ctx, url));
-    let results = futures_util::future::join_all(probes).await;
-
-    let mut reference: Option<RemoteFile> = None;
-    let mut sources = Vec::new();
-    let mut first_error = None;
-    for (url, result) in ctx.request.sources.iter().zip(results) {
-        match result {
-            Ok(remote) => match &reference {
-                None => {
-                    sources.push(Arc::new(Source::new(url.clone(), &remote)));
-                    reference = Some(remote);
-                }
-                Some(base) if base.ranges && remote.ranges && base.size == remote.size => {
-                    sources.push(Arc::new(Source::new(url.clone(), &remote)));
-                }
-                Some(_) => {
-                    tracing::warn!(mirror = %display_url(url), "mirror differs from the main source, ignoring it");
-                }
-            },
-            Err(EngineError::Cancelled) => return Err(EngineError::Cancelled),
-            Err(error) => {
-                tracing::warn!(source = %display_url(url), %error, "source unavailable");
-                first_error.get_or_insert(error);
-            }
-        }
-    }
-    match reference {
-        Some(remote) => Ok((SourcePool::new(sources), remote)),
-        None => Err(first_error.unwrap_or(EngineError::NoSources("no sources given".into()))),
-    }
-}
-
-async fn probe_with_retry(ctx: &TaskContext, url: &Url) -> Result<RemoteFile> {
-    let shared = &ctx.shared;
-    let gate = shared.hosts.gate(&crate::net::host_key(url));
-    let mut attempt = 0;
-    loop {
-        let result = {
-            let _host = or_cancel(&ctx.cancel, gate.acquire()).await?;
-            let probe = probe::probe(&shared.client, url, &ctx.request.headers);
-            or_cancel(&ctx.cancel, probe).await?
-        };
-        let error = match result {
-            Ok(remote) => return Ok(remote),
-            Err(error) => error,
-        };
-        if let FetchError::Status {
-            status,
-            retry_after,
-        } = &error
-            && is_throttle(*status)
-        {
-            gate.throttle(retry_after.unwrap_or(crate::constants::DEFAULT_THROTTLE_PAUSE));
-        }
-        attempt += 1;
-        match shared.config.retry.action(&error, attempt, true) {
-            RetryAction::Retry(delay) => {
-                ctx.observer.retrying(ctx.id, &error.to_string(), delay);
-                or_cancel(&ctx.cancel, tokio::time::sleep(delay)).await?;
-            }
-            _ => return Err(error.into_engine_error(&display_url(url))),
         }
     }
 }

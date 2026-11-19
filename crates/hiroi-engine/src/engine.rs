@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::EngineConfig;
 use crate::error::{EngineError, Result};
+use crate::inspect::{self, RemoteInfo};
 use crate::limit::{HostLimiter, RateLimiter};
 use crate::listener::DownloadListener;
 use crate::net::{client, display_url};
@@ -173,6 +174,15 @@ impl Engine {
             .iter()
             .map(|(&id, entry)| snapshot(id, entry))
             .collect()
+    }
+
+    /// Asks the servers of `request` about the file without downloading
+    /// it: name, size, resume support, and which mirrors agree.
+    pub async fn inspect(&self, request: &DownloadRequest) -> RemoteInfo {
+        let cancel = CancellationToken::new();
+        let shared = &self.inner.shared;
+        let results = inspect::probe_all(shared, request, &cancel, &|_, _| {}).await;
+        inspect::describe(request, &results)
     }
 
     /// Waits until the download is paused, completed, failed, or cancelled.

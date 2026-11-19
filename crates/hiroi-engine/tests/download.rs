@@ -313,6 +313,35 @@ async fn mirrors_share_the_work() {
 }
 
 #[tokio::test]
+async fn inspect_explains_each_source() {
+    let main = TestServer::start(Behavior::default()).await;
+    let plain = TestServer::start(Behavior {
+        ranges: false,
+        ..Behavior::default()
+    })
+    .await;
+    main.put("i.bin", content(300 * KIB, 12));
+    plain.put("i.bin", content(300 * KIB, 12));
+    let request = DownloadRequest::new(&main.url("i.bin"))
+        .unwrap()
+        .mirror(&plain.url("i.bin"))
+        .unwrap()
+        .mirror(&main.url("missing.bin"))
+        .unwrap();
+
+    let info = engine().inspect(&request).await;
+
+    assert_eq!(info.file_name.as_deref(), Some("i.bin"));
+    assert_eq!(info.size, Some(300 * KIB as u64));
+    assert!(info.resumable);
+    let usable: Vec<bool> = info.sources.iter().map(|s| s.usable).collect();
+    assert_eq!(usable, [true, false, false]);
+    assert!(info.sources[1].error.as_deref().unwrap().contains("ranges"));
+    assert!(info.sources[2].error.as_deref().unwrap().contains("404"));
+    assert_eq!(main.bytes_served(), 1, "a probe asks for a single byte");
+}
+
+#[tokio::test]
 async fn checksums_are_verified() {
     let data = b"hello hiroi".to_vec();
     let server = TestServer::start(Behavior::default()).await;
