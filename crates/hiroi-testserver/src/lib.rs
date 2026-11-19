@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::{Path, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
@@ -70,6 +70,17 @@ struct ServerState {
     throttled: AtomicUsize,
     requests: AtomicUsize,
     versions: AtomicU64,
+    redirects: Mutex<HashMap<String, String>>,
+    /// Requests in the order they arrived.
+    seen: Mutex<Vec<Received>>,
+}
+
+/// What a request asked for, as the server received it.
+#[derive(Debug, Clone)]
+pub struct Received {
+    pub name: String,
+    pub query: Option<String>,
+    pub headers: HeaderMap,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +88,7 @@ struct FileEntry {
     data: Bytes,
     etag: String,
     content_type: &'static str,
+    headers: Vec<(&'static str, String)>,
 }
 
 impl TestServer {
@@ -99,12 +111,25 @@ impl TestServer {
 
     /// Like [`Self::put`], with an explicit `Content-Type`.
     pub fn put_typed(&self, name: &str, data: impl Into<Vec<u8>>, content_type: &'static str) {
+        self.put_with_headers(name, data, content_type, Vec::new());
+    }
+
+    /// Like [`Self::put_typed`], with extra response headers such as
+    /// `Set-Cookie` or a CDN's own.
+    pub fn put_with_headers(
+        &self,
+        name: &str,
+        data: impl Into<Vec<u8>>,
+        content_type: &'static str,
+        headers: Vec<(&'static str, String)>,
+    ) {
         let data = data.into();
         let version = self.state.versions.fetch_add(1, Ordering::Relaxed);
         let etag = format!("\"v{version}-{}\"", data.len());
         let entry = FileEntry {
             etag,
             content_type,
+            headers,
             data: data.into(),
         };
         self.state
@@ -112,6 +137,20 @@ impl TestServer {
             .lock()
             .unwrap()
             .insert(name.to_string(), entry);
+    }
+
+    /// Answers requests for `name` with a 302 to `target`.
+    pub fn redirect(&self, name: &str, target: &str) {
+        self.state
+            .redirects
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), target.to_string());
+    }
+
+    /// Every request so far, oldest first.
+    pub fn received(&self) -> Vec<Received> {
+        self.state.seen.lock().unwrap().clone()
     }
 
     /// Removes a file; later requests get 404.
@@ -166,9 +205,22 @@ impl Drop for ActiveGuard {
 async fn serve(
     State(state): State<Arc<ServerState>>,
     Path(name): Path<String>,
+    RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Response {
     let index = state.requests.fetch_add(1, Ordering::Relaxed);
+    state.seen.lock().unwrap().push(Received {
+        name: name.clone(),
+        query,
+        headers: headers.clone(),
+    });
+    if let Some(target) = state.redirects.lock().unwrap().get(&name) {
+        return Response::builder()
+            .status(StatusCode::FOUND)
+            .header(header::LOCATION, target)
+            .body(Body::empty())
+            .unwrap();
+    }
     let mut behavior = state.behavior.lock().unwrap().clone();
     if behavior.slow_requests.contains(&index) {
         behavior.bytes_per_sec = Some(behavior.slow_rate);
@@ -206,6 +258,9 @@ async fn serve(
         .header(header::ACCEPT_RANGES, accept_ranges);
     if let Some(disposition) = &behavior.content_disposition {
         response = response.header(header::CONTENT_DISPOSITION, disposition);
+    }
+    for (name, value) in &file.headers {
+        response = response.header(*name, value);
     }
 
     let (start, end) = match range {
