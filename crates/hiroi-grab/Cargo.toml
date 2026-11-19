@@ -1,0 +1,21 @@
+[package]
+name = "hiroi-grab"
+description = "Finds downloadable links, pictures, videos, and streams on web pages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+futures-util.workspace = true
+lol_html.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+hiroi-testserver.workspace = true
+
+[lints]
+workspace = true
