@@ -10,6 +10,7 @@ license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
 hiroi-engine = { path = "crates/hiroi-engine" }
+hiroi-proto = { path = "crates/hiroi-proto" }
 hiroi-testserver = { path = "crates/hiroi-testserver" }
 
 anyhow = "1"
