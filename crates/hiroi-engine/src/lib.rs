@@ -39,6 +39,7 @@ mod request;
 mod snapshot;
 mod storage;
 mod task;
+mod xml;
 
 pub use checksum::{Checksum, HashAlgorithm};
 pub use config::EngineConfig;

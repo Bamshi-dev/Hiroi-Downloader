@@ -3,118 +3,12 @@
 //! quality). We pick one video and one audio representation and list
 //! their segments.
 
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::{Reader, XmlVersion};
 use reqwest::Url;
 
 use super::hls::DRM;
 use super::pieces::Piece;
 use crate::request::Quality;
-
-/// A tiny XML tree; MPDs are small, so this is simpler than streaming.
-#[derive(Debug, Clone, Default)]
-struct Element {
-    name: String,
-    attributes: Vec<(String, String)>,
-    children: Vec<Element>,
-    text: String,
-}
-
-impl Element {
-    fn attr(&self, name: &str) -> Option<&str> {
-        self.attributes
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-
-    fn children<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Element> + 'a {
-        self.children.iter().filter(move |child| child.name == name)
-    }
-
-    fn child<'a>(&'a self, name: &'a str) -> Option<&'a Element> {
-        self.children(name).next()
-    }
-}
-
-fn parse_xml(text: &str) -> Result<Element, String> {
-    let mut reader = Reader::from_str(text);
-    let mut stack: Vec<Element> = vec![Element::default()];
-    loop {
-        match reader.read_event().map_err(|e| format!("bad MPD: {e}"))? {
-            Event::Start(start) => stack.push(element(&start)?),
-            Event::Empty(start) => {
-                let element = element(&start)?;
-                stack.last_mut().expect("root").children.push(element);
-            }
-            Event::End(_) => {
-                let done = stack.pop().ok_or("unbalanced MPD")?;
-                stack
-                    .last_mut()
-                    .ok_or("unbalanced MPD")?
-                    .children
-                    .push(done);
-            }
-            Event::Text(text) => {
-                if let Some(current) = stack.last_mut() {
-                    current.text.push_str(&text.html_content());
-                }
-            }
-            // `&amp;` and friends arrive as their own events.
-            Event::GeneralRef(reference) => {
-                if let Some(current) = stack.last_mut() {
-                    let name: &str = reference.as_ref();
-                    current.text.push_str(entity(name).as_deref().unwrap_or(""));
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    let root = stack.pop().ok_or("empty MPD")?;
-    root.children
-        .into_iter()
-        .find(|e| e.name == "MPD")
-        .ok_or_else(|| "not a DASH manifest".to_string())
-}
-
-/// The predefined XML entities and character references.
-fn entity(name: &str) -> Option<String> {
-    let text = match name {
-        "amp" => "&",
-        "lt" => "<",
-        "gt" => ">",
-        "quot" => "\"",
-        "apos" => "'",
-        _ => {
-            let code = match name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")) {
-                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
-                None => name.strip_prefix('#')?.parse().ok()?,
-            };
-            return char::from_u32(code).map(String::from);
-        }
-    };
-    Some(text.to_string())
-}
-
-fn element(start: &BytesStart<'_>) -> Result<Element, String> {
-    let name = start.local_name().as_ref().to_string();
-    let mut attributes = Vec::new();
-    for attribute in start.attributes() {
-        let attribute = attribute.map_err(|e| e.to_string())?;
-        let key = attribute.key.local_name().as_ref().to_string();
-        let value = attribute
-            .normalized_value(XmlVersion::Implicit1_0)
-            .map_err(|e| e.to_string())?
-            .into_owned();
-        attributes.push((key, value));
-    }
-    Ok(Element {
-        name,
-        attributes,
-        ..Element::default()
-    })
-}
+use crate::xml::{self, Element};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Manifest {
@@ -148,9 +42,10 @@ pub(crate) fn parse(
     if !is_manifest(text) {
         return Err("not a DASH manifest".into());
     }
-    let mpd = parse_xml(text)?;
+    let document = xml::parse(text)?;
+    let mpd = document.child("MPD").ok_or("not a DASH manifest")?;
     let live = mpd.attr("type") == Some("dynamic");
-    let base = base_url(url, &mpd);
+    let base = base_url(url, mpd);
     let period = mpd.child("Period").ok_or("MPD without a Period")?;
     let base = base_url(&base, period);
     let duration = period
