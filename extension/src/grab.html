@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hiroi: grab page</title>
+  <link rel="stylesheet" href="grab.css">
+</head>
+<body>
+  <header>
+    <h1>Grab with Hiroi</h1>
+    <p id="source"></p>
+    <div class="controls">
+      <label><input type="checkbox" id="all"> Select all</label>
+      <select id="kind"><option value="">All types</option></select>
+      <input type="search" id="filter" placeholder="Filter by name or text">
+      <label><input type="checkbox" id="pages"> Show other pages</label>
+      <button id="go" disabled>Download selected</button>
+    </div>
+  </header>
+  <table>
+    <thead><tr><th></th><th>Type</th><th>Name</th><th>Text</th><th>Status</th></tr></thead>
+    <tbody id="links"></tbody>
+  </table>
+  <script src="common.js"></script>
+  <script src="grab.js"></script>
+</body>
+</html>

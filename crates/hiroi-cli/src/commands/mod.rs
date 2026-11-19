@@ -1,5 +1,6 @@
 //! One module per subcommand.
 
+pub mod browser;
 pub mod clipboard;
 pub mod daemon;
 pub mod get;

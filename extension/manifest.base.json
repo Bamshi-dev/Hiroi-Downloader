@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "Hiroi Downloader",
+  "version": "0.1.0",
+  "description": "Send downloads, and everything a page offers, to Hiroi Downloader.",
+  "permissions": ["contextMenus", "cookies", "downloads", "nativeMessaging", "scripting", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_title": "Hiroi Downloader", "default_popup": "popup.html" }
+}

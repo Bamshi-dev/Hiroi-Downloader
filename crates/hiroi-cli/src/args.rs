@@ -38,6 +38,16 @@ pub enum Command {
     Grab(GrabArgs),
     /// Run the background service in the foreground.
     Daemon(DaemonArgs),
+    /// Set up the browser extension's connection to Hiroi.
+    #[command(subcommand)]
+    Browser(BrowserCommand),
+    /// Bridge for the browser extension; browsers start this themselves.
+    #[command(hide = true)]
+    NativeHost {
+        /// Browsers pass their own arguments; they are ignored.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, hide = true)]
+        ignored: Vec<String>,
+    },
     /// Add downloads to the background service.
     Add(AddArgs),
     /// List the service's jobs.
@@ -223,6 +233,22 @@ pub struct AddArgs {
     /// Open the folder in the file manager when the download completes.
     #[arg(long)]
     pub open_folder: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BrowserCommand {
+    /// Register the native-messaging host with your browsers.
+    Install {
+        /// Firefox.
+        #[arg(long)]
+        firefox: bool,
+        /// Chrome, Chromium, Brave, Edge, or Vivaldi, with the extension's
+        /// ID from chrome://extensions.
+        #[arg(long, value_name = "EXTENSION_ID")]
+        chrome: Option<String>,
+    },
+    /// Remove the host registrations.
+    Uninstall,
 }
 
 #[derive(Debug, Subcommand)]

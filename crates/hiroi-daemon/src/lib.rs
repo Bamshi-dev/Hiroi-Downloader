@@ -15,6 +15,7 @@ mod actions;
 pub mod category;
 pub mod client;
 mod convert;
+pub mod native;
 pub mod paths;
 pub mod schedule;
 mod server;
