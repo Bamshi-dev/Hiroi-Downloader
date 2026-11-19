@@ -35,7 +35,8 @@ pub struct JobId(pub i64);
 
 impl std::fmt::Display for JobId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        // Delegating keeps width and alignment flags working.
+        std::fmt::Display::fmt(&self.0, f)
     }
 }
 

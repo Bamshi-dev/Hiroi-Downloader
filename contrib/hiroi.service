@@ -1,0 +1,28 @@
+# systemd user unit for the Hiroi background service.
+#
+# Install:
+#   cp contrib/hiroi.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hiroi
+#
+# Logs: journalctl --user -u hiroi
+
+[Unit]
+Description=Hiroi Downloader service
+After=network-online.target
+
+[Service]
+ExecStart=%h/.cargo/bin/hiroi daemon
+# SIGTERM makes the service pause every download and save it.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+# The service needs the network, your download folder, and its own data.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/Downloads %h/.local/share/hiroi %t
+
+[Install]
+WantedBy=default.target

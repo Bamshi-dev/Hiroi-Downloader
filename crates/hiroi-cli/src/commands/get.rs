@@ -15,7 +15,7 @@ use crate::ui::ProgressView;
 const EXIT_INTERRUPTED: u8 = 130;
 
 pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
-    let urls = collect_urls(&args)?;
+    let urls = collect_urls(&args.urls, args.input.as_deref())?;
     let target = &args.target;
     let single = urls.len() == 1;
     if !single
@@ -24,7 +24,7 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
         bail!("--output, --mirror, and --checksum only work with a single URL");
     }
 
-    let mut config = options::engine_config(&args.network);
+    let mut config = options::engine_config(&args.engine);
     config.max_active_downloads = args.jobs;
     config.global_speed_limit = args.global_limit;
     let engine = Engine::new(config)?;
@@ -34,7 +34,7 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
     let requests = urls
         .iter()
         .map(|url| {
-            options::download_request(url, target, &args.network)
+            options::download_request(url, target, &args.request)
                 .with_context(|| format!("bad download `{url}`"))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -56,9 +56,9 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
     Ok(report(&engine, &ids, &view, args.quiet))
 }
 
-fn collect_urls(args: &GetArgs) -> Result<Vec<String>> {
-    let mut urls = args.urls.clone();
-    if let Some(path) = &args.input {
+pub fn collect_urls(urls: &[String], input: Option<&std::path::Path>) -> Result<Vec<String>> {
+    let mut urls = urls.to_vec();
+    if let Some(path) = input {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("could not read {}", path.display()))?;
         let lines = text

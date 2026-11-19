@@ -21,11 +21,34 @@ async fn main() -> ExitCode {
     let result = match cli.command {
         Command::Get(args) => commands::get::run(args, verbose).await,
         Command::Info(args) => commands::info::run(args).await,
+        Command::Daemon(args) => commands::daemon::run(args, cli.socket).await,
+        command => client_command(command, cli.socket).await,
     };
     result.unwrap_or_else(|error| {
         eprintln!("error: {error:#}");
         ExitCode::FAILURE
     })
+}
+
+/// Commands that need a connection to the background service.
+async fn client_command(
+    command: Command,
+    socket: Option<std::path::PathBuf>,
+) -> anyhow::Result<ExitCode> {
+    use commands::jobs;
+    let mut client = jobs::connect(socket).await?;
+    match command {
+        Command::Add(args) => jobs::add(&mut client, args).await,
+        Command::List => jobs::list(&mut client).await,
+        Command::Pause(args) => jobs::pause_or_resume(&mut client, args, false).await,
+        Command::Resume(args) => jobs::pause_or_resume(&mut client, args, true).await,
+        Command::Cancel(args) => jobs::cancel_or_remove(&mut client, args, false).await,
+        Command::Remove(args) => jobs::cancel_or_remove(&mut client, args, true).await,
+        Command::Limit(args) => jobs::limit(&mut client, args).await,
+        Command::Watch => jobs::watch(&mut client).await,
+        Command::Stop => jobs::stop(&mut client).await,
+        Command::Get(_) | Command::Info(_) | Command::Daemon(_) => unreachable!("handled in main"),
+    }
 }
 
 fn init_logging(verbose: u8) {

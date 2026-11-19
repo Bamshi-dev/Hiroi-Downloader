@@ -18,6 +18,10 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
+    /// Socket of the background service.
+    #[arg(long, global = true, value_name = "PATH", env = "HIROI_SOCKET")]
+    pub socket: Option<PathBuf>,
+
     /// Log what the engine does (-v info, -vv debug). Replaces the progress bars.
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -29,6 +33,97 @@ pub enum Command {
     Get(GetArgs),
     /// Ask the servers about a file without downloading it.
     Info(InfoArgs),
+    /// Run the background service in the foreground.
+    Daemon(DaemonArgs),
+    /// Add downloads to the background service.
+    Add(AddArgs),
+    /// List the service's jobs.
+    List,
+    /// Pause jobs (an id, or `all`).
+    Pause(JobsArg),
+    /// Resume paused or failed jobs (an id, or `all`).
+    Resume(JobsArg),
+    /// Stop jobs and delete their temporary files.
+    Cancel(IdsArg),
+    /// Forget finished jobs; their files stay.
+    Remove(IdsArg),
+    /// Change the speed limit of a job, or of the service.
+    Limit(LimitArgs),
+    /// Show live progress of the service's jobs.
+    Watch,
+    /// Stop the background service; running jobs continue next time.
+    Stop,
+}
+
+#[derive(Debug, Args)]
+pub struct DaemonArgs {
+    /// Database file (default: ~/.local/share/hiroi/hiroi.db).
+    #[arg(long, value_name = "PATH")]
+    pub database: Option<PathBuf>,
+
+    /// Folder for downloads that don't name one (default: ~/Downloads).
+    #[arg(short, long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
+
+    /// Downloads running at the same time.
+    #[arg(short, long, default_value_t = 3)]
+    pub jobs: usize,
+
+    #[command(flatten)]
+    pub engine: EngineArgs,
+}
+
+#[derive(Debug, Args)]
+pub struct AddArgs {
+    /// URLs to add.
+    #[arg(value_name = "URL", required_unless_present = "input")]
+    pub urls: Vec<String>,
+
+    /// Read URLs from a file, one per line (`#` starts a comment).
+    #[arg(short, long, value_name = "FILE")]
+    pub input: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(flatten)]
+    pub request: RequestArgs,
+
+    /// Queue to put the jobs in.
+    #[arg(short, long, value_name = "NAME")]
+    pub queue: Option<String>,
+
+    /// Add without starting.
+    #[arg(long)]
+    pub paused: bool,
+
+    /// Start before other queued jobs.
+    #[arg(long)]
+    pub high_priority: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct JobsArg {
+    /// A job id, or `all`.
+    #[arg(value_name = "ID|all")]
+    pub job: String,
+}
+
+#[derive(Debug, Args)]
+pub struct IdsArg {
+    #[arg(value_name = "ID", required = true)]
+    pub jobs: Vec<i64>,
+}
+
+#[derive(Debug, Args)]
+pub struct LimitArgs {
+    /// A speed such as 2M, or `off`.
+    #[arg(value_name = "RATE|off")]
+    pub rate: String,
+
+    /// Limit one job instead of the whole service.
+    #[arg(long, value_name = "ID")]
+    pub job: Option<i64>,
 }
 
 #[derive(Debug, Args)]
@@ -53,7 +148,10 @@ pub struct GetArgs {
     pub global_limit: Option<u64>,
 
     #[command(flatten)]
-    pub network: NetworkArgs,
+    pub request: RequestArgs,
+
+    #[command(flatten)]
+    pub engine: EngineArgs,
 
     /// No progress output.
     #[arg(short, long)]
@@ -71,15 +169,19 @@ pub struct InfoArgs {
     pub mirrors: Vec<String>,
 
     #[command(flatten)]
-    pub network: NetworkArgs,
+    pub request: RequestArgs,
+
+    #[command(flatten)]
+    pub engine: EngineArgs,
 }
 
 /// Where and how one download is saved.
 #[derive(Debug, Args)]
 pub struct TargetArgs {
-    /// Folder to save into.
-    #[arg(short, long, value_name = "DIR", default_value = ".")]
-    pub dir: PathBuf,
+    /// Folder to save into (default: the current folder for `get`, the
+    /// service's download folder for `add`).
+    #[arg(short, long, value_name = "DIR")]
+    pub dir: Option<PathBuf>,
 
     /// File name to save as (single download only).
     #[arg(short, long, value_name = "NAME")]
@@ -106,9 +208,9 @@ pub struct TargetArgs {
     pub on_conflict: Conflict,
 }
 
-/// How requests are sent. Shared by every command that talks to servers.
+/// What each request carries. Applies to one download.
 #[derive(Debug, Args)]
-pub struct NetworkArgs {
+pub struct RequestArgs {
     /// Extra request header (repeatable).
     #[arg(short = 'H', long = "header", value_name = "NAME: VALUE")]
     pub headers: Vec<String>,
@@ -124,7 +226,11 @@ pub struct NetworkArgs {
     /// User agent to send instead of the default.
     #[arg(long, value_name = "UA")]
     pub user_agent: Option<String>,
+}
 
+/// How the engine talks to servers. Applies to everything it downloads.
+#[derive(Debug, Args)]
+pub struct EngineArgs {
     /// Proxy for all requests, e.g. http://host:3128 or socks5h://host:1080.
     #[arg(long, value_name = "URL")]
     pub proxy: Option<String>,

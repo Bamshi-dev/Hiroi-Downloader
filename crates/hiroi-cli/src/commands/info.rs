@@ -10,8 +10,8 @@ use crate::args::InfoArgs;
 use crate::options;
 
 pub async fn run(args: InfoArgs) -> Result<ExitCode> {
-    let engine = Engine::new(options::engine_config(&args.network))?;
-    let request = options::base_request(&args.url, &args.mirrors, &args.network)?;
+    let engine = Engine::new(options::engine_config(&args.engine))?;
+    let request = options::base_request(&args.url, &args.mirrors, &args.request)?;
     let info = engine.inspect(&request).await;
 
     let unknown = || "unknown".to_string();

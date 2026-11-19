@@ -566,7 +566,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "hiroi-daemon",
  "hiroi-engine",
+ "hiroi-proto",
  "indicatif",
  "tokio",
  "tracing-subscriber",

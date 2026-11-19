@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+hiroi-daemon.workspace = true
+hiroi-proto.workspace = true
 clap.workspace = true
 hiroi-engine.workspace = true
 indicatif.workspace = true
