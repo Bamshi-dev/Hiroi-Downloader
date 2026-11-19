@@ -1,4 +1,4 @@
-//! HLS streams from a local server.
+//! HLS and DASH streams from a local server.
 
 use std::path::Path;
 use std::time::Duration;
@@ -315,6 +315,181 @@ async fn separate_audio_is_joined_with_ffmpeg() {
     let snapshot = run(
         &engine(),
         DownloadRequest::new(&server.url("film.m3u8"))
+            .unwrap()
+            .output_dir(dir.path()),
+    )
+    .await;
+
+    assert_eq!(
+        snapshot.status,
+        DownloadStatus::Completed,
+        "{:?}",
+        snapshot.status
+    );
+    let probe = std::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(dir.path().join("film.mp4"))
+        .output()
+        .unwrap();
+    let streams = String::from_utf8_lossy(&probe.stdout);
+    assert!(
+        streams.contains("video") && streams.contains("audio"),
+        "{streams}"
+    );
+}
+
+const MPD: &str = "application/dash+xml";
+
+fn timeline_manifest(first: usize, count: usize, live: bool) -> String {
+    let kind = if live { "dynamic" } else { "static" };
+    format!(
+        r#"<?xml version="1.0"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="{kind}" minimumUpdatePeriod="PT0.3S">
+  <Period><AdaptationSet mimeType="video/mp4">
+    <SegmentTemplate timescale="1" initialization="init-$RepresentationID$.mp4" media="$RepresentationID$-$Time$.m4s">
+      <SegmentTimeline><S t="{first}" d="1" r="{repeat}"/></SegmentTimeline>
+    </SegmentTemplate>
+    <Representation id="hi" bandwidth="900000" height="720"/>
+    <Representation id="lo" bandwidth="100000" height="240"/>
+  </AdaptationSet></Period>
+</MPD>"#,
+        repeat = count - 1
+    )
+}
+
+#[tokio::test]
+async fn dash_templates_pick_a_representation_and_join_its_segments() {
+    let server = TestServer::start(Behavior::default()).await;
+    let parts = segments(6, 30_000);
+    for id in ["hi", "lo"] {
+        server.put(&format!("init-{id}.mp4"), id.repeat(10).into_bytes());
+        for (i, part) in parts.iter().enumerate() {
+            server.put(&format!("{id}-{i}.m4s"), part.clone());
+        }
+    }
+    server.put_typed("show.mpd", timeline_manifest(0, 6, false), MPD);
+    let dir = tempfile::tempdir().unwrap();
+
+    let request = DownloadRequest::new(&server.url("show.mpd"))
+        .unwrap()
+        .output_dir(dir.path())
+        .quality(Quality::MaxHeight(480));
+    let snapshot = run(&engine(), request).await;
+
+    assert_eq!(
+        snapshot.status,
+        DownloadStatus::Completed,
+        "{:?}",
+        snapshot.status
+    );
+    let expected = [b"lo".repeat(10), parts.concat()].concat();
+    assert_eq!(read(&dir.path().join("show.mp4")), expected);
+}
+
+#[tokio::test]
+async fn live_dash_manifests_are_reloaded_for_new_segments() {
+    let server = TestServer::start(Behavior::default()).await;
+    let parts = segments(7, 10_000);
+    server.put("init-hi.mp4", b"init".to_vec());
+    for (i, part) in parts.iter().enumerate() {
+        server.put(&format!("hi-{i}.m4s"), part.clone());
+    }
+    // A window of three segments that slides forward.
+    server.put_typed("live.mpd", timeline_manifest(0, 3, true), MPD);
+    let publisher = async {
+        for first in 1..=4 {
+            tokio::time::sleep(Duration::from_millis(350)).await;
+            server.put_typed("live.mpd", timeline_manifest(first, 3, first < 4), MPD);
+        }
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine();
+    let request = DownloadRequest::new(&server.url("live.mpd"))
+        .unwrap()
+        .output_dir(dir.path());
+    let (snapshot, ()) = tokio::join!(run(&engine, request), publisher);
+
+    assert_eq!(
+        snapshot.status,
+        DownloadStatus::Completed,
+        "{:?}",
+        snapshot.status
+    );
+    let expected = [b"init".to_vec(), parts.concat()].concat();
+    assert_eq!(read(&dir.path().join("live.mp4")), expected);
+}
+
+#[tokio::test]
+async fn protected_dash_manifests_are_refused() {
+    let server = TestServer::start(Behavior::default()).await;
+    let manifest = r#"<MPD><Period><AdaptationSet mimeType="video/mp4">
+        <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc"/>
+        <Representation id="v" bandwidth="1"><BaseURL>v.mp4</BaseURL></Representation>
+        </AdaptationSet></Period></MPD>"#;
+    server.put_typed("locked.mpd", manifest, MPD);
+    let dir = tempfile::tempdir().unwrap();
+
+    let snapshot = run(
+        &engine(),
+        DownloadRequest::new(&server.url("locked.mpd"))
+            .unwrap()
+            .output_dir(dir.path()),
+    )
+    .await;
+
+    assert!(
+        matches!(&snapshot.status, DownloadStatus::Failed(m) if m.contains("DRM")),
+        "{:?}",
+        snapshot.status
+    );
+}
+
+#[tokio::test]
+async fn dash_from_ffmpeg_is_muxed_into_one_file() {
+    if std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("ffmpeg not installed; skipping");
+        return;
+    }
+    let work = tempfile::tempdir().unwrap();
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(
+            "-f lavfi -i testsrc=size=160x90:rate=10:duration=3 -f lavfi -i sine=frequency=440:duration=3 \
+             -map 0:v -map 1:a -c:v libx264 -preset ultrafast -c:a aac \
+             -f dash -seg_duration 1 -use_template 1 -use_timeline 1 film.mpd"
+                .split_whitespace(),
+        )
+        .current_dir(work.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let server = TestServer::start(Behavior::default()).await;
+    for entry in std::fs::read_dir(work.path()).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let kind = if name.ends_with(".mpd") {
+            MPD
+        } else {
+            "video/mp4"
+        };
+        server.put_typed(&name, read(&path), kind);
+    }
+    let dir = tempfile::tempdir().unwrap();
+
+    let snapshot = run(
+        &engine(),
+        DownloadRequest::new(&server.url("film.mpd"))
             .unwrap()
             .output_dir(dir.path()),
     )

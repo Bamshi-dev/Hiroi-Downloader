@@ -1,6 +1,7 @@
 //! Streams: HLS and DASH playlists, live or on demand, and their
 //! assembly into one file.
 
+pub(crate) mod dash;
 pub(crate) mod hls;
 pub(crate) mod mux;
 pub(crate) mod pieces;
@@ -29,6 +30,7 @@ const MAX_SMALL_BODY: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StreamKind {
     Hls,
+    Dash,
 }
 
 /// Recognizes a stream from the probe: its Content-Type, or failing
@@ -42,8 +44,17 @@ pub(crate) fn detect(remote: &RemoteFile) -> Option<StreamKind> {
     if content_type.contains("mpegurl") {
         return Some(StreamKind::Hls);
     }
+    if content_type.contains("dash+xml") {
+        return Some(StreamKind::Dash);
+    }
     let path = remote.final_url.path().to_ascii_lowercase();
-    path.ends_with(".m3u8").then_some(StreamKind::Hls)
+    if path.ends_with(".m3u8") {
+        Some(StreamKind::Hls)
+    } else if path.ends_with(".mpd") {
+        Some(StreamKind::Dash)
+    } else {
+        None
+    }
 }
 
 pub(crate) async fn download(
@@ -53,6 +64,132 @@ pub(crate) async fn download(
 ) -> Result<PathBuf> {
     match kind {
         StreamKind::Hls => download_hls(ctx, url).await,
+        StreamKind::Dash => download_dash(ctx, url).await,
+    }
+}
+
+async fn download_dash(ctx: &Arc<TaskContext>, url: Url) -> Result<PathBuf> {
+    let text = fetch_text(ctx, &url).await?;
+    let manifest = dash::parse(&text, &url, ctx.request.stream.quality, None)
+        .map_err(EngineError::Protocol)?;
+    let want = (
+        manifest
+            .video
+            .as_ref()
+            .map(|t| t.id.clone())
+            .unwrap_or_default(),
+        manifest
+            .audio
+            .as_ref()
+            .map(|t| t.id.clone())
+            .unwrap_or_default(),
+    );
+    let live = manifest.live;
+    let mp4 = manifest
+        .video
+        .as_ref()
+        .or(manifest.audio.as_ref())
+        .is_none_or(|t| t.mp4);
+    let extension = if mp4 { "mp4" } else { "ts" };
+    let paths = plan_stream(ctx, &url, extension)?;
+    report_start(ctx, &paths, live);
+    let progress = Arc::new(TrackProgress::default());
+    let source = |video: bool, first: Option<dash::TrackPlan>| DashSource {
+        ctx,
+        url: url.clone(),
+        video,
+        want: want.clone(),
+        first,
+        last: None,
+        init_sent: false,
+        live,
+        period: manifest.update_period,
+    };
+
+    let result = match (manifest.video.clone(), manifest.audio.clone()) {
+        (Some(video), Some(audio)) => {
+            let video_track = track(ctx, &paths, "video", extension, &url, live, &progress);
+            let audio_track = track(ctx, &paths, "audio", extension, &url, live, &progress);
+            let both = async {
+                tokio::try_join!(
+                    video_track.run(source(true, Some(video))),
+                    audio_track.run(source(false, Some(audio)))
+                )
+            };
+            reporting(ctx, &progress, both).await?;
+            mux::combine(&video_track.output, &audio_track.output, &paths.final_path).await
+        }
+        (video, audio) => {
+            let is_video = video.is_some();
+            let only = track(
+                ctx,
+                &paths,
+                if is_video { "video" } else { "audio" },
+                extension,
+                &url,
+                live,
+                &progress,
+            );
+            reporting(ctx, &progress, only.run(source(is_video, video.or(audio)))).await?;
+            finalize(ctx, &only.output, &paths)
+        }
+    };
+    result.map(|()| paths.final_path.clone())
+}
+
+/// One track of a DASH manifest; live manifests are reloaded and only
+/// segments newer than the last one handed out are passed on.
+struct DashSource<'a> {
+    ctx: &'a Arc<TaskContext>,
+    url: Url,
+    video: bool,
+    want: (String, String),
+    first: Option<dash::TrackPlan>,
+    last: Option<u64>,
+    init_sent: bool,
+    live: bool,
+    period: f64,
+}
+
+impl PieceSource for DashSource<'_> {
+    async fn next_batch(&mut self) -> Result<Batch> {
+        let plan = match self.first.take() {
+            Some(plan) => plan,
+            None => {
+                let text = fetch_text(self.ctx, &self.url).await?;
+                let want = Some((self.want.0.as_str(), self.want.1.as_str()));
+                let manifest = dash::parse(&text, &self.url, Quality::Best, want)
+                    .map_err(EngineError::Protocol)?;
+                self.live = manifest.live;
+                let plan = if self.video {
+                    manifest.video
+                } else {
+                    manifest.audio
+                };
+                plan.ok_or_else(|| {
+                    EngineError::Protocol("the chosen track disappeared from the manifest".into())
+                })?
+            }
+        };
+        let mut pieces = Vec::new();
+        if !self.init_sent
+            && let Some(init) = plan.init
+        {
+            pieces.push(init);
+            self.init_sent = true;
+        }
+        for (position, piece) in plan.segments {
+            if self.last.is_none_or(|last| position > last) {
+                pieces.push(piece);
+                self.last = Some(position);
+            }
+        }
+        let wait = Duration::from_secs_f64(self.period.clamp(0.5, 30.0));
+        Ok(Batch {
+            pieces,
+            finished: !self.live,
+            wait,
+        })
     }
 }
 
