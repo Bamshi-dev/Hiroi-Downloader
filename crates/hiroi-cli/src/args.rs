@@ -34,6 +34,9 @@ pub enum Command {
     Get(GetArgs),
     /// Ask the servers about a file without downloading it.
     Info(InfoArgs),
+    /// Show who would see a download, and what it would give away,
+    /// without downloading it.
+    Exposure(ExposureArgs),
     /// List what a web page offers (files, pictures, videos, streams),
     /// choose, and download.
     Grab(GrabArgs),
@@ -391,6 +394,38 @@ pub struct InfoArgs {
     pub engine: EngineArgs,
 }
 
+#[derive(Debug, Args)]
+pub struct ExposureArgs {
+    /// The URL to look at.
+    #[arg(value_name = "URL")]
+    pub url: String,
+
+    /// Another server with the same file (repeatable).
+    #[arg(short, long = "mirror", value_name = "URL")]
+    pub mirrors: Vec<String>,
+
+    /// Also ask an address-echo service which address servers see.
+    /// This contacts that service.
+    #[arg(long)]
+    pub check_ip: bool,
+
+    /// With --check-ip, ask once more without the proxy to compare.
+    /// This shows your real address to the service.
+    #[arg(long, requires = "check_ip")]
+    pub direct: bool,
+
+    /// Address-echo service for --check-ip; it must answer a GET with
+    /// the caller's address as plain text.
+    #[arg(long, value_name = "URL", default_value = "https://api.ipify.org")]
+    pub ip_service: String,
+
+    #[command(flatten)]
+    pub request: RequestArgs,
+
+    #[command(flatten)]
+    pub engine: EngineArgs,
+}
+
 /// Where and how one download is saved.
 #[derive(Debug, Args)]
 pub struct TargetArgs {
@@ -482,6 +517,19 @@ pub struct EngineArgs {
     /// Follow redirects from HTTPS to plain HTTP (unsafe).
     #[arg(long)]
     pub allow_insecure_redirects: bool,
+
+    /// Refuse to run without --proxy, so a forgotten setting cannot
+    /// expose your address.
+    #[arg(long, env = "HIROI_REQUIRE_PROXY")]
+    pub require_proxy: bool,
+
+    /// Remove tracking parameters (utm_source, fbclid, ...) from links.
+    #[arg(long)]
+    pub strip_tracking: bool,
+
+    /// Never send a Referer, not even one the browser handed over.
+    #[arg(long)]
+    pub no_referer: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

@@ -49,6 +49,14 @@ pub struct EngineConfig {
     /// Find torrent peers through the DHT. Magnet links rarely work
     /// without it.
     pub torrent_dht: bool,
+    /// Refuse to start without a proxy, so a forgotten setting cannot
+    /// expose the user's address.
+    pub require_proxy: bool,
+    /// Remove tracking parameters (`utm_source`, `fbclid`, ...) from the
+    /// URLs of new downloads.
+    pub strip_tracking: bool,
+    /// Never send a Referer, even when a browser handed one over.
+    pub no_referer: bool,
 }
 
 impl Default for EngineConfig {
@@ -75,6 +83,9 @@ impl Default for EngineConfig {
             yt_dlp: PathBuf::from("yt-dlp"),
             ssh_known_hosts: None,
             torrent_dht: true,
+            require_proxy: false,
+            strip_tracking: false,
+            no_referer: false,
         }
     }
 }

@@ -11,10 +11,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::EngineConfig;
 use crate::error::{EngineError, Result};
+use crate::exposure::{self, ExposureOptions, ExposureReport};
 use crate::inspect::{self, RemoteInfo};
 use crate::limit::{HostLimiter, RateLimiter};
 use crate::listener::DownloadListener;
 use crate::net::{client, display_url};
+use crate::privacy;
 use crate::request::DownloadRequest;
 use crate::snapshot::{DownloadId, DownloadSnapshot, DownloadStatus};
 use crate::task::{self, EngineShared, TaskContext, TaskObserver, TaskProgress};
@@ -60,6 +62,7 @@ enum Stop {
 impl Engine {
     pub fn new(config: EngineConfig) -> Result<Self> {
         let config = config.normalized();
+        privacy::check_config(&config)?;
         let shared = EngineShared {
             client: client::build_client(&config)?,
             hosts: HostLimiter::new(config.max_connections_per_host),
@@ -94,7 +97,8 @@ impl Engine {
         self.insert(request, DownloadStatus::Paused)
     }
 
-    fn insert(&self, request: DownloadRequest, status: DownloadStatus) -> DownloadId {
+    fn insert(&self, mut request: DownloadRequest, status: DownloadStatus) -> DownloadId {
+        privacy::apply(&self.inner.shared.config, &mut request);
         let id = DownloadId(self.inner.next_id.fetch_add(1, Ordering::Relaxed));
         let entry = Entry {
             rate: Arc::new(RateLimiter::new(request.speed_limit)),
@@ -194,6 +198,16 @@ impl Engine {
         let shared = &self.inner.shared;
         let results = inspect::probe_all(shared, request, &cancel, &|_, _| {}).await;
         inspect::describe(request, &results)
+    }
+
+    /// Reports what downloading `request` would reveal, and to whom,
+    /// without downloading it. See [`ExposureReport`].
+    pub async fn exposure(
+        &self,
+        request: &DownloadRequest,
+        options: &ExposureOptions,
+    ) -> Result<ExposureReport> {
+        exposure::report(&self.inner.shared.config, request, options).await
     }
 
     /// Waits until the download is paused, completed, failed, or cancelled.

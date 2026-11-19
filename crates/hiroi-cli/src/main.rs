@@ -21,6 +21,7 @@ async fn main() -> ExitCode {
     let result = match cli.command {
         Command::Get(args) => commands::get::run(args, verbose).await,
         Command::Info(args) => commands::info::run(args).await,
+        Command::Exposure(args) => commands::exposure::run(args).await,
         Command::Grab(args) => commands::grab::run(args, cli.socket, verbose).await,
         Command::Daemon(args) => commands::daemon::run(args, cli.socket).await,
         Command::Browser(command) => commands::browser::run(command),
@@ -75,6 +76,7 @@ async fn client_command(
         Command::Stop => jobs::stop(&mut client).await,
         Command::Get(_)
         | Command::Info(_)
+        | Command::Exposure(_)
         | Command::Grab(_)
         | Command::Daemon(_)
         | Command::Browser(_)

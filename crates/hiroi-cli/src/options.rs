@@ -16,6 +16,9 @@ pub fn engine_config(engine: &EngineArgs) -> EngineConfig {
         min_connection_speed: engine.min_speed,
         preallocate: !engine.no_prealloc,
         allow_insecure_redirects: engine.allow_insecure_redirects,
+        require_proxy: engine.require_proxy,
+        strip_tracking: engine.strip_tracking,
+        no_referer: engine.no_referer,
         ..EngineConfig::default()
     }
 }

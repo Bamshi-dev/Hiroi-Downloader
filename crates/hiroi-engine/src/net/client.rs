@@ -7,13 +7,25 @@ use crate::constants::MAX_REDIRECTS;
 use crate::error::{EngineError, Result};
 
 pub(crate) fn build_client(config: &EngineConfig) -> Result<Client> {
+    let allow_insecure = config.allow_insecure_redirects;
+    let policy = Policy::custom(move |attempt| {
+        match check_redirect(attempt.previous(), attempt.url(), allow_insecure) {
+            Ok(()) => attempt.follow(),
+            Err(reason) => attempt.error(reason),
+        }
+    });
+    build_client_with(config, policy)
+}
+
+/// The engine's client with another redirect policy, for the exposure
+/// report, which looks at every hop itself.
+pub(crate) fn build_client_with(config: &EngineConfig, policy: Policy) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
     // Byte offsets only line up with the file on the server when the
     // transfer is not compressed.
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
 
-    let allow_insecure = config.allow_insecure_redirects;
     let mut builder = Client::builder()
         .user_agent(config.user_agent.as_str())
         .default_headers(headers)
@@ -21,12 +33,7 @@ pub(crate) fn build_client(config: &EngineConfig) -> Result<Client> {
         .read_timeout(config.read_timeout)
         .pool_max_idle_per_host(config.max_connections_per_host)
         .tcp_nodelay(true)
-        .redirect(Policy::custom(move |attempt| {
-            match check_redirect(attempt.previous(), attempt.url(), allow_insecure) {
-                Ok(()) => attempt.follow(),
-                Err(reason) => attempt.error(reason),
-            }
-        }));
+        .redirect(policy);
 
     if let Some(proxy) = &config.proxy {
         let proxy = Proxy::all(proxy)
