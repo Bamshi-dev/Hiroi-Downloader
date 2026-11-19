@@ -36,8 +36,8 @@ them, build and test it explicitly, for example
 ## What a good change looks like
 
 A change does one thing. A bug fix comes with a test that fails without
-the fix. A new feature comes with tests and with documentation in
-`docs/`. Code follows `rustfmt` and produces no clippy warnings.
+the fix. A new feature comes with tests and with documentation in the
+README. Code follows `rustfmt` and produces no clippy warnings.
 
 Comments explain why the code does something, not what it does; the
 code itself should say what it does. Public items get doc comments.
