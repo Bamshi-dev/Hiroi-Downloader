@@ -54,6 +54,10 @@ pub struct StreamOptions {
     pub quality: Quality,
     /// Stop recording a live stream after this long.
     pub live_limit: Option<std::time::Duration>,
+    /// The URL is a page for yt-dlp to find the media on.
+    pub extract: bool,
+    /// yt-dlp format selection, such as `bv*+ba/b`; implies `extract`.
+    pub format: Option<String>,
 }
 
 /// Queue order: higher priorities start first, ties keep insertion order.
@@ -189,6 +193,19 @@ impl DownloadRequest {
     /// Variant to pick from streams that offer several.
     pub fn quality(mut self, quality: Quality) -> Self {
         self.stream.quality = quality;
+        self
+    }
+
+    /// Let yt-dlp find the media on the page at the URL.
+    pub fn extract(mut self, extract: bool) -> Self {
+        self.stream.extract = extract;
+        self
+    }
+
+    /// Ask yt-dlp for these formats instead of choosing by quality.
+    pub fn format(mut self, format: Option<String>) -> Self {
+        self.stream.extract |= format.is_some();
+        self.stream.format = format;
         self
     }
 

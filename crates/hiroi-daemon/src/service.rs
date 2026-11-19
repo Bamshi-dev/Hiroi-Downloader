@@ -282,7 +282,7 @@ impl Service {
                 protocol: hiroi_proto::PROTOCOL_VERSION,
                 program: env!("CARGO_PKG_VERSION").to_string(),
             }),
-            Request::Add(job) => self.add(job).await.map(|job| Response::Added { job }),
+            Request::Add(job) => self.add(*job).await.map(|job| Response::Added { job }),
             Request::List => Ok(Response::Jobs { jobs: self.jobs() }),
             Request::Get { job } => self
                 .job(job)

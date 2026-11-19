@@ -57,6 +57,23 @@ pub(crate) struct TaskContext {
     pub observer: Arc<dyn TaskObserver>,
 }
 
+impl TaskContext {
+    /// The same task working on another request, such as one of the
+    /// tracks an extractor found. Progress, limits, and cancellation
+    /// stay shared.
+    pub fn derive(&self, request: DownloadRequest) -> Self {
+        Self {
+            id: self.id,
+            request: Arc::new(request),
+            shared: Arc::clone(&self.shared),
+            progress: Arc::clone(&self.progress),
+            rate: Arc::clone(&self.rate),
+            cancel: self.cancel.clone(),
+            observer: Arc::clone(&self.observer),
+        }
+    }
+}
+
 impl std::fmt::Debug for TaskContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TaskContext")
@@ -96,6 +113,9 @@ impl TaskProgress {
 pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     ctx.observer
         .status_changed(ctx.id, DownloadStatus::Connecting);
+    if ctx.request.stream.extract {
+        return media::extract::download(&ctx).await;
+    }
     let on_retry = |reason: &str, delay| ctx.observer.retrying(ctx.id, reason, delay);
     let results = inspect::probe_all(&ctx.shared, &ctx.request, &ctx.cancel, &on_retry).await;
     let (pool, remote) = inspect::select(&ctx.request, results)?;

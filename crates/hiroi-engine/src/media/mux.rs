@@ -11,7 +11,10 @@ use tokio::process::Command;
 use crate::error::{EngineError, Result};
 
 pub(crate) async fn combine(video: &Path, audio: &Path, target: &Path) -> Result<()> {
-    let partial = target.with_extension("muxing.mp4");
+    // ffmpeg picks the container from the extension, so the partial
+    // file keeps the target's.
+    let extension = target.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+    let partial = target.with_extension(format!("muxing.{extension}"));
     let status = Command::new("ffmpeg")
         .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
         .arg(video)

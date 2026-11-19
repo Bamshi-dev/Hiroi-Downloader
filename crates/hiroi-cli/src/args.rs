@@ -430,6 +430,14 @@ pub struct TargetArgs {
     /// Stop recording a live stream after this long, e.g. 30m or 2h.
     #[arg(long, value_name = "TIME", value_parser = parse_duration)]
     pub live_limit: Option<Duration>,
+
+    /// The URL is a video page: let yt-dlp find the media on it.
+    #[arg(short = 'x', long)]
+    pub extract: bool,
+
+    /// yt-dlp format selection, e.g. `bv*+ba/b` (implies --extract).
+    #[arg(short = 'f', long, value_name = "SPEC")]
+    pub format: Option<String>,
 }
 
 /// What each request carries. Applies to one download.

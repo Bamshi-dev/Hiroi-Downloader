@@ -44,7 +44,7 @@ pub async fn add(client: &mut Client, args: AddArgs) -> Result<ExitCode> {
             job.priority = Some(Priority::High);
         }
         match client
-            .call(Request::Add(job))
+            .call(Request::Add(Box::new(job)))
             .await
             .with_context(|| format!("could not add {url}"))?
         {

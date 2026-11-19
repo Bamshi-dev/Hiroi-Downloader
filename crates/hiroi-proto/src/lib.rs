@@ -52,7 +52,7 @@ pub struct RequestEnvelope {
 pub enum Request {
     /// Protocol and program version.
     Version,
-    Add(NewJob),
+    Add(Box<NewJob>),
     List,
     Get {
         job: JobId,
@@ -142,6 +142,10 @@ pub struct NewJob {
     pub quality: Option<Quality>,
     /// Stop recording a live stream after this many seconds.
     pub live_limit_secs: Option<u64>,
+    /// The URL is a page for yt-dlp to find the media on.
+    pub extract: bool,
+    /// yt-dlp format selection; implies `extract`.
+    pub format: Option<String>,
 }
 
 /// Which variant of a stream to download, when it offers several.

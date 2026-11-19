@@ -87,7 +87,7 @@ async fn handle(message: Message, client: &mut Option<Client>, socket: &Path) ->
     let request = match message {
         Message::Ping => Request::Version,
         Message::Download(download) => match job(download) {
-            Ok(job) => Request::Add(job),
+            Ok(job) => Request::Add(Box::new(job)),
             Err(answer) => return answer,
         },
     };

@@ -63,7 +63,7 @@ impl Fixture {
 }
 
 async fn add(client: &mut Client, job: NewJob) -> JobId {
-    match client.call(Request::Add(job)).await.unwrap() {
+    match client.call(Request::Add(Box::new(job))).await.unwrap() {
         Response::Added { job } => job,
         other => panic!("unexpected reply {other:?}"),
     }
@@ -251,10 +251,10 @@ async fn running_jobs_cannot_be_removed_and_errors_are_clear() {
     assert!(missing.to_string().contains("no job"), "{missing}");
 
     let bad = client
-        .call(Request::Add(NewJob {
+        .call(Request::Add(Box::new(NewJob {
             url: "file:///etc/passwd".into(),
             ..NewJob::default()
-        }))
+        })))
         .await;
     assert!(bad.unwrap_err().to_string().contains("scheme"));
 }
@@ -378,10 +378,10 @@ async fn categories_sort_files_and_duplicates_are_refused() {
     assert!(fixture.downloads().join("Videos").join("clip.mp4").exists());
 
     let again = client
-        .call(Request::Add(NewJob {
+        .call(Request::Add(Box::new(NewJob {
             url: server.url("clip.mp4"),
             ..NewJob::default()
-        }))
+        })))
         .await;
     assert!(
         again

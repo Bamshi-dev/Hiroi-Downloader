@@ -2,6 +2,7 @@
 //! assembly into one file.
 
 pub(crate) mod dash;
+pub(crate) mod extract;
 pub(crate) mod hls;
 pub(crate) mod mux;
 pub(crate) mod pieces;

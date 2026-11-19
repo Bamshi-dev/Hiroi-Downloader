@@ -66,7 +66,9 @@ pub fn download_request(
         .speed_limit(target.limit)
         .on_conflict(target.on_conflict.into())
         .quality(target.quality)
-        .live_limit(target.live_limit);
+        .live_limit(target.live_limit)
+        .extract(target.extract)
+        .format(target.format.clone());
     if let Some(name) = &target.output {
         request = request.file_name(name);
     }
@@ -104,6 +106,8 @@ pub fn new_job(url: &str, target: &TargetArgs, args: &RequestArgs) -> Result<New
             Quality::MaxHeight(height) => ProtoQuality::MaxHeight(height),
         }),
         live_limit_secs: target.live_limit.map(|limit| limit.as_secs().max(1)),
+        extract: target.extract || target.format.is_some(),
+        format: target.format.clone(),
         ..NewJob::default()
     })
 }

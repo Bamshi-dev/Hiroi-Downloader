@@ -21,6 +21,11 @@ pub fn job_options(job: &NewJob) -> JobOptions {
         open_folder: job.open_folder,
         quality: job.quality,
         live_limit_secs: job.live_limit_secs.filter(|&secs| secs > 0),
+        extract: job.extract || job.format.is_some(),
+        format: job
+            .format
+            .clone()
+            .filter(|format| !format.trim().is_empty()),
     }
 }
 
@@ -52,7 +57,9 @@ pub fn request(
         .on_conflict(conflict(options.on_conflict))
         .priority(priority(options.priority))
         .quality(quality(options.quality))
-        .live_limit(options.live_limit_secs.map(Duration::from_secs));
+        .live_limit(options.live_limit_secs.map(Duration::from_secs))
+        .extract(options.extract)
+        .format(options.format.clone());
     Ok(request)
 }
 

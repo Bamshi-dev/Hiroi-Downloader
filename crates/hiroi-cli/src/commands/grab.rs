@@ -216,7 +216,7 @@ async fn queue(
         if args.request.referer.is_none() {
             job.headers.push(("Referer".into(), link.page.to_string()));
         }
-        match client.call(Request::Add(job)).await {
+        match client.call(Request::Add(Box::new(job))).await {
             Ok(Response::Added { job }) => println!("{job}\t{}", link.url),
             Ok(_) => {}
             Err(error) => eprintln!("not added {}: {error}", link.url),

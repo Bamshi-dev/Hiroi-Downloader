@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::constants;
@@ -40,6 +41,8 @@ pub struct EngineConfig {
     pub slow_connection_window: Duration,
     pub checkpoint_interval: Duration,
     pub progress_interval: Duration,
+    /// The yt-dlp program, for pages that need a site extractor.
+    pub yt_dlp: PathBuf,
 }
 
 impl Default for EngineConfig {
@@ -63,6 +66,7 @@ impl Default for EngineConfig {
             slow_connection_window: constants::SLOW_CONNECTION_WINDOW,
             checkpoint_interval: constants::CHECKPOINT_INTERVAL,
             progress_interval: constants::PROGRESS_INTERVAL,
+            yt_dlp: PathBuf::from("yt-dlp"),
         }
     }
 }

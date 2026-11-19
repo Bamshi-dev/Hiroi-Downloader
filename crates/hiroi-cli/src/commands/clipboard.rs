@@ -48,10 +48,10 @@ pub async fn run(client: &mut Client, auto: bool, interval: Duration) -> Result<
             continue;
         }
         match client
-            .call(Request::Add(NewJob {
+            .call(Request::Add(Box::new(NewJob {
                 url: url.clone(),
                 ..NewJob::default()
-            }))
+            })))
             .await
         {
             Ok(Response::Added { job }) => eprintln!("Added job {job}: {url}"),

@@ -56,6 +56,9 @@ pub enum EngineError {
 
     #[error("download was stopped")]
     Cancelled,
+
+    #[error("site extractor: {0}")]
+    Extractor(String),
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;

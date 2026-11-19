@@ -72,6 +72,8 @@ pub struct JobOptions {
     pub open_folder: bool,
     pub quality: Option<Quality>,
     pub live_limit_secs: Option<u64>,
+    pub extract: bool,
+    pub format: Option<String>,
 }
 
 /// A job about to be inserted; the store assigns the id.
