@@ -42,8 +42,11 @@ impl ControlFile {
     /// Loads a control file; `None` if it is missing, from another version,
     /// or inconsistent (a damaged file must never cause a corrupt download).
     pub fn load(path: &Path) -> Option<Self> {
-        let bytes = std::fs::read(path).ok()?;
-        let control: Self = serde_json::from_slice(&bytes).ok()?;
+        Self::from_bytes(&std::fs::read(path).ok()?)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let control: Self = serde_json::from_slice(bytes).ok()?;
         (control.version == CONTROL_FILE_VERSION && control.is_consistent()).then_some(control)
     }
 
@@ -70,9 +73,14 @@ impl ControlFile {
         let bounded = segments
             .iter()
             .all(|s| s.start <= s.end && s.end <= self.total_size && s.written <= s.end - s.start);
-        let disjoint = segments.windows(2).all(|pair| pair[0].end <= pair[1].start);
-        let covered: u64 = segments.iter().map(|s| s.end - s.start).sum();
-        bounded && disjoint && covered == self.total_size
+        // Only bounded segments can be measured without overflowing.
+        if !bounded || !segments.windows(2).all(|pair| pair[0].end <= pair[1].start) {
+            return false;
+        }
+        let covered = segments
+            .iter()
+            .try_fold(0u64, |sum, s| sum.checked_add(s.end - s.start));
+        covered == Some(self.total_size)
     }
 }
 
@@ -85,6 +93,18 @@ fn tmp_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn damaged_segments_are_refused_not_panicked_on() {
+        let backwards = br#"{"version":1,"source":"s","total_size":100,"validator":null,
+            "segments":[{"start":90,"end":10,"written":0}]}"#;
+        assert!(ControlFile::from_bytes(backwards).is_none());
+        let huge =
+            br#"{"version":1,"source":"s","total_size":18446744073709551615,"validator":null,
+            "segments":[{"start":0,"end":18446744073709551615,"written":0},
+                        {"start":0,"end":18446744073709551615,"written":0}]}"#;
+        assert!(ControlFile::from_bytes(huge).is_none());
+    }
 
     fn sample() -> ControlFile {
         let mut control = ControlFile::new("https://e.com/f".into(), 100, Some("\"v1\"".into()));
