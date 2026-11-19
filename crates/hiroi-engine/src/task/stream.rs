@@ -8,10 +8,10 @@ use futures_util::StreamExt;
 
 use super::meter::SpeedMeter;
 use super::{TaskContext, discard, or_cancel};
-use crate::constants::{DEFAULT_THROTTLE_PAUSE, WRITE_BUFFER_SIZE};
+use crate::constants::WRITE_BUFFER_SIZE;
 use crate::error::{EngineError, Result};
-use crate::net::probe::retry_after;
-use crate::net::retry::{FetchError, FetchResult, RetryAction, is_throttle};
+use crate::net::protocol::{self, Want};
+use crate::net::retry::{FetchError, FetchResult, RetryAction};
 use crate::net::source::{Source, SourcePool};
 use crate::snapshot::SegmentSnapshot;
 use crate::storage::file::OutputFile;
@@ -66,26 +66,9 @@ async fn fetch(
     let gate = shared.hosts.gate(source.host());
     let _host = or_cancel(&ctx.cancel, gate.acquire()).await?;
 
-    let request = shared
-        .client
-        .get(source.url())
-        .headers(ctx.request.headers.clone());
-    let response = or_cancel(&ctx.cancel, request.send())
-        .await?
-        .map_err(FetchError::Transport)?;
-    let status = response.status();
-    if !status.is_success() {
-        let retry_after = retry_after(&response);
-        if is_throttle(status) {
-            gate.throttle(retry_after.unwrap_or(DEFAULT_THROTTLE_PAUSE));
-        }
-        return Err(FetchError::Status {
-            status,
-            retry_after,
-        });
-    }
-
-    let mut body = response.bytes_stream();
+    let headers = &ctx.request.headers;
+    let open = protocol::open(shared, source, headers, &gate, Want::Whole);
+    let mut body = or_cancel(&ctx.cancel, open).await??;
     let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
     let mut written = 0u64;
     let mut meter = SpeedMeter::new(0);
@@ -97,7 +80,7 @@ async fn fetch(
             () = ctx.cancel.cancelled() => return Err(FetchError::Cancelled),
             next = body.next() => next,
         };
-        let Some(chunk) = next.transpose().map_err(FetchError::Transport)? else {
+        let Some(chunk) = next.transpose()? else {
             break;
         };
         or_cancel(&ctx.cancel, async {

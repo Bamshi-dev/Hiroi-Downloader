@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 aes.workspace = true
+bytes.workspace = true
 cbc.workspace = true
 fastrand.workspace = true
 futures-util.workspace = true

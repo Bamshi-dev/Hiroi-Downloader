@@ -13,7 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::constants::DEFAULT_THROTTLE_PAUSE;
 use crate::error::{EngineError, Result};
-use crate::net::probe::{self, RemoteFile};
+use crate::net::probe::RemoteFile;
+use crate::net::protocol;
 use crate::net::retry::{FetchError, RetryAction, is_throttle};
 use crate::net::source::{Source, SourcePool};
 use crate::net::{display_url, host_key};
@@ -176,7 +177,7 @@ async fn probe_with_retry(
     loop {
         let result = {
             let _host = or_cancel(cancel, gate.acquire()).await?;
-            let probe = probe::probe(&shared.client, url, &request.headers);
+            let probe = protocol::probe(shared, url, &request.headers);
             or_cancel(cancel, probe).await?
         };
         let error = match result {

@@ -17,6 +17,7 @@ hiroi-store = { path = "crates/hiroi-store" }
 hiroi-testserver = { path = "crates/hiroi-testserver" }
 
 aes = "0.9"
+bytes = "1"
 anyhow = "1"
 axum = "0.8"
 cbc = "0.2"

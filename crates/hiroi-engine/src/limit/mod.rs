@@ -3,5 +3,5 @@
 pub(crate) mod host;
 pub(crate) mod rate;
 
-pub(crate) use host::HostLimiter;
+pub(crate) use host::{HostGate, HostLimiter};
 pub(crate) use rate::RateLimiter;

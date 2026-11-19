@@ -5,17 +5,14 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use futures_util::StreamExt;
-use reqwest::header::{CONTENT_RANGE, IF_RANGE, RANGE};
-use reqwest::{Response, StatusCode};
 
 use super::or_cancel;
 use super::segmented::Transfer;
 use super::segments::Segment;
-use crate::constants::{DEFAULT_THROTTLE_PAUSE, SLOW_CONNECTION_RATIO, WRITE_BUFFER_SIZE};
+use crate::constants::{SLOW_CONNECTION_RATIO, WRITE_BUFFER_SIZE};
 use crate::error::Result;
-use crate::net::headers::parse_content_range;
-use crate::net::probe::{self, retry_after};
-use crate::net::retry::{FetchError, FetchResult, RetryAction, is_throttle};
+use crate::net::protocol::{self, Body, Want};
+use crate::net::retry::{FetchError, FetchResult, RetryAction};
 use crate::net::source::Source;
 
 /// Keeps taking segments until there is nothing left worth taking.
@@ -98,66 +95,23 @@ async fn fetch(
     let _source = source.track();
     let _active = ActiveConnection::new(transfer);
 
-    let mut request = shared
-        .client
-        .get(source.url())
-        .headers(transfer.ctx.request.headers.clone())
-        .header(RANGE, format!("bytes={start}-{}", end - 1));
-    // If the file changed, the server answers 200 instead of mixing versions.
-    if let Some(validator) = source.validator() {
-        request = request.header(IF_RANGE, validator);
-    }
-    let response = or_cancel(cancel, request.send())
-        .await?
-        .map_err(FetchError::Transport)?;
-
-    match response.status() {
-        StatusCode::PARTIAL_CONTENT => {}
-        StatusCode::OK | StatusCode::RANGE_NOT_SATISFIABLE => return Err(FetchError::Changed),
-        status => {
-            let retry_after = retry_after(&response);
-            if is_throttle(status) {
-                gate.throttle(retry_after.unwrap_or(DEFAULT_THROTTLE_PAUSE));
-            }
-            return Err(FetchError::Status {
-                status,
-                retry_after,
-            });
-        }
-    }
-    check_range(&response, start, transfer.total_size)?;
-    receive(transfer, segment, response, slot).await
-}
-
-/// The server must send exactly the bytes we asked for, of the file we know.
-fn check_range(response: &Response, start: u64, total_size: u64) -> FetchResult<()> {
-    let header = response
-        .headers()
-        .get(CONTENT_RANGE)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| FetchError::Protocol("206 response without Content-Range".into()))?;
-    let range = parse_content_range(header)
-        .ok_or_else(|| FetchError::Protocol(format!("unreadable Content-Range `{header}`")))?;
-    if range.total.is_some_and(|total| total != total_size) {
-        return Err(FetchError::Changed);
-    }
-    if range.start != start {
-        return Err(FetchError::Protocol(format!(
-            "asked for bytes from {start}, server sent from {}",
-            range.start
-        )));
-    }
-    Ok(())
+    let want = Want::Range {
+        start,
+        end,
+        total: transfer.total_size,
+    };
+    let headers = &transfer.ctx.request.headers;
+    let body = or_cancel(cancel, protocol::open(shared, source, headers, &gate, want)).await??;
+    receive(transfer, segment, body, slot).await
 }
 
 async fn receive(
     transfer: &Transfer,
     segment: &Segment,
-    response: Response,
+    mut body: Body,
     slot: usize,
 ) -> FetchResult<()> {
     let ctx = &transfer.ctx;
-    let mut body = response.bytes_stream();
     let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
     let mut speed = SpeedCheck::new(transfer, slot);
 
@@ -169,7 +123,7 @@ async fn receive(
         };
         let chunk = match next {
             Some(Ok(chunk)) => chunk,
-            Some(Err(error)) => break Err(FetchError::Transport(error)),
+            Some(Err(error)) => break Err(error),
             None if segment.fully_reserved() => break Ok(()),
             None => break Err(FetchError::ClosedEarly),
         };
@@ -221,7 +175,7 @@ async fn flush(transfer: &Transfer, segment: &Segment, buffer: Vec<u8>) -> Fetch
 async fn refresh(transfer: &Transfer, source: &Source) -> Result<bool> {
     source.mark_refreshed();
     let ctx = &transfer.ctx;
-    let probe = probe::probe(&ctx.shared.client, source.original(), &ctx.request.headers);
+    let probe = protocol::probe(&ctx.shared, source.original(), &ctx.request.headers);
     let fresh = match or_cancel(&transfer.cancel, probe).await? {
         Ok(remote) => remote,
         Err(_) => return Ok(false),

@@ -3,6 +3,7 @@
 pub(crate) mod client;
 pub(crate) mod headers;
 pub(crate) mod probe;
+pub(crate) mod protocol;
 pub mod retry;
 pub(crate) mod source;
 
