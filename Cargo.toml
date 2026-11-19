@@ -11,6 +11,7 @@ license = "AGPL-3.0-or-later"
 [workspace.dependencies]
 hiroi-engine = { path = "crates/hiroi-engine" }
 hiroi-proto = { path = "crates/hiroi-proto" }
+hiroi-store = { path = "crates/hiroi-store" }
 hiroi-testserver = { path = "crates/hiroi-testserver" }
 
 anyhow = "1"
@@ -26,6 +27,8 @@ parking_lot = "0.12"
 percent-encoding = "2"
 # HTTP/2 is left out on purpose: it multiplexes every range request over one
 # TCP connection, which defeats the point of parallel connections.
+# Bundled: no system SQLite needed, same version everywhere.
+rusqlite = { version = "0.43", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "socks"] }
 rustix = { version = "1", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
