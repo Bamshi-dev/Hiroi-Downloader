@@ -1,4 +1,6 @@
 //! End-to-end tests: a real service on a temporary socket.
+// The service listens on a Unix socket.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

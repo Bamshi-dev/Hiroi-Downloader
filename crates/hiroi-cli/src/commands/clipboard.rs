@@ -13,11 +13,16 @@ use anyhow::{Result, bail};
 use hiroi_daemon::Client;
 use hiroi_proto::{NewJob, Request, Response};
 
+#[cfg(not(any(target_os = "macos", windows)))]
 const READERS: &[&[&str]] = &[
     &["wl-paste", "--no-newline", "--type", "text"],
     &["xclip", "-out", "-selection", "clipboard"],
     &["xsel", "--clipboard", "--output"],
 ];
+#[cfg(target_os = "macos")]
+const READERS: &[&[&str]] = &[&["pbpaste"]];
+#[cfg(windows)]
+const READERS: &[&[&str]] = &[&["powershell", "-NoProfile", "-Command", "Get-Clipboard"]];
 
 /// Copied text larger than this is not a link.
 const MAX_TEXT: usize = 8 * 1024;

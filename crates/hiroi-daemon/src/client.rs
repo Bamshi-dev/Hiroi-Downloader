@@ -8,13 +8,16 @@ use futures_util::{SinkExt, StreamExt};
 use hiroi_proto::{
     Event, MAX_LINE_BYTES, Outcome, Request, RequestEnvelope, Response, ServerMessage,
 };
-use tokio::net::UnixStream;
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
+
+use crate::transport::{self, Stream};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("the Hiroi service is not running (no socket at {}); start it with `hiroi daemon`", .0.display())]
     NotRunning(PathBuf),
+    #[error("{}", transport::UNSUPPORTED)]
+    Unsupported,
     #[error("connection to the service failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("the service sent something unexpected: {0}")]
@@ -25,7 +28,7 @@ pub enum ClientError {
 
 #[derive(Debug)]
 pub struct Client {
-    framed: Framed<UnixStream, LinesCodec>,
+    framed: Framed<Stream, LinesCodec>,
     next_id: u64,
     /// Events that arrived while waiting for a reply.
     pending: VecDeque<Event>,
@@ -33,12 +36,13 @@ pub struct Client {
 
 impl Client {
     pub async fn connect(socket: &Path) -> Result<Self, ClientError> {
-        let stream = UnixStream::connect(socket)
+        let stream = transport::connect(socket)
             .await
             .map_err(|error| match error.kind() {
                 std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused => {
                     ClientError::NotRunning(socket.to_path_buf())
                 }
+                std::io::ErrorKind::Unsupported => ClientError::Unsupported,
                 _ => ClientError::Io(error),
             })?;
         let framed = Framed::new(stream, LinesCodec::new_with_max_length(MAX_LINE_BYTES));

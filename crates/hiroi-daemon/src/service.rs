@@ -73,6 +73,8 @@ pub enum DaemonError {
     Store(#[from] StoreError),
     #[error(transparent)]
     Engine(#[from] EngineError),
+    #[error("{}", crate::transport::UNSUPPORTED)]
+    Unsupported,
 }
 
 /// Runs the service until `shutdown` resolves or a client asks it to

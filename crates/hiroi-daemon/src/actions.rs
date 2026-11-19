@@ -10,8 +10,46 @@ use std::path::Path;
 use tokio::process::Command;
 
 /// Default command for "power off when done".
+#[cfg(target_os = "macos")]
+pub const POWER_OFF: &[&str] = &[
+    "osascript",
+    "-e",
+    "tell application \"System Events\" to shut down",
+];
+/// Default command for "power off when done". A minute's grace, which
+/// `shutdown /a` cancels.
+#[cfg(windows)]
+pub const POWER_OFF: &[&str] = &["shutdown", "/s", "/t", "60"];
+/// Default command for "power off when done".
+#[cfg(not(any(target_os = "macos", windows)))]
 pub const POWER_OFF: &[&str] = &["systemctl", "poweroff"];
 
+#[cfg(target_os = "macos")]
+pub fn notify(title: &str, body: &str) {
+    // The text goes in as arguments, not into the script, so a file
+    // name cannot change what the script does.
+    let script =
+        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run";
+    spawn(
+        &[
+            "osascript".into(),
+            "-e".into(),
+            script.into(),
+            title.into(),
+            body.into(),
+        ],
+        "notification",
+    );
+}
+
+#[cfg(windows)]
+pub fn notify(title: &str, body: &str) {
+    // No notification program ships with Windows that takes plain
+    // arguments; the log has it instead.
+    tracing::info!(title, body, "notification");
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn notify(title: &str, body: &str) {
     spawn(
         &[
@@ -46,10 +84,18 @@ pub fn run_after(argv: &[String], path: &Path) {
     spawn(&argv, "command after download");
 }
 
+/// The program that opens a folder in the file manager.
+#[cfg(target_os = "macos")]
+const OPENER: &str = "open";
+#[cfg(windows)]
+const OPENER: &str = "explorer";
+#[cfg(not(any(target_os = "macos", windows)))]
+const OPENER: &str = "xdg-open";
+
 pub fn open_folder(path: &Path) {
     if let Some(dir) = path.parent() {
         spawn(
-            &["xdg-open".into(), dir.to_string_lossy().into_owned()],
+            &[OPENER.into(), dir.to_string_lossy().into_owned()],
             "file manager",
         );
     }

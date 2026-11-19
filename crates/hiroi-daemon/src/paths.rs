@@ -26,12 +26,17 @@ pub fn default_socket() -> PathBuf {
     runtime_dir().join(SOCKET_NAME)
 }
 
-/// `~/.local/share/hiroi/hiroi.db` on Linux.
-pub fn default_database() -> PathBuf {
+/// `~/.local/share/hiroi` on Linux, `~/Library/Application Support/hiroi`
+/// on macOS.
+pub fn data_dir() -> PathBuf {
     match ProjectDirs::from("", "", "hiroi") {
-        Some(dirs) => dirs.data_dir().join(DATABASE_NAME),
-        None => PathBuf::from(DATABASE_NAME),
+        Some(dirs) => dirs.data_dir().to_path_buf(),
+        None => PathBuf::from("."),
     }
+}
+
+pub fn default_database() -> PathBuf {
+    data_dir().join(DATABASE_NAME)
 }
 
 /// The user's download folder, or the current directory.

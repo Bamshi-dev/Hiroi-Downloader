@@ -20,6 +20,7 @@ pub mod paths;
 pub mod schedule;
 mod server;
 mod service;
+mod transport;
 
 pub use client::{Client, ClientError};
 pub use service::{DaemonConfig, DaemonError, run};
