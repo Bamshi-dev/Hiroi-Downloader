@@ -12,7 +12,9 @@ use hiroi_proto::{
 };
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 
-use crate::args::{AddArgs, IdsArg, JobsArg, LimitArgs, QueueCommand, ScheduleCommand};
+use crate::args::{
+    AddArgs, CategoryCommand, IdsArg, JobsArg, LimitArgs, QueueCommand, ScheduleCommand,
+};
 use crate::commands::get::collect_urls;
 use crate::options;
 use crate::size::parse_rate;
@@ -31,6 +33,7 @@ pub async fn add(client: &mut Client, args: AddArgs) -> Result<ExitCode> {
         let mut job = options::new_job(&url, &args.target, &args.request)?;
         job.queue = args.queue.clone();
         job.paused = args.paused;
+        job.allow_duplicate = args.allow_duplicate;
         if args.high_priority {
             job.priority = Some(Priority::High);
         }
@@ -316,5 +319,55 @@ pub async fn schedule(client: &mut Client, command: ScheduleCommand) -> Result<E
             client.call(Request::RemoveSchedule { id }).await?;
         }
     }
+    Ok(ExitCode::SUCCESS)
+}
+
+pub async fn category(client: &mut Client, command: CategoryCommand) -> Result<ExitCode> {
+    let Response::Categories(mut categories) = client.call(Request::Categories).await? else {
+        bail!("unexpected reply");
+    };
+    match command {
+        CategoryCommand::List => {
+            println!(
+                "Sorting into category folders is {}.",
+                if categories.enabled { "on" } else { "off" }
+            );
+            for category in &categories.categories {
+                println!(
+                    "{:<12}  {:<12}  {}",
+                    category.name,
+                    category.folder,
+                    category.extensions.join(",")
+                );
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        CategoryCommand::On => categories.enabled = true,
+        CategoryCommand::Off => categories.enabled = false,
+        CategoryCommand::Set { name, folder, ext } => {
+            let extensions = ext
+                .iter()
+                .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+                .collect();
+            categories
+                .categories
+                .retain(|category| category.name != name);
+            categories.categories.push(hiroi_proto::Category {
+                name,
+                folder,
+                extensions,
+            });
+        }
+        CategoryCommand::Remove { name } => {
+            let before = categories.categories.len();
+            categories
+                .categories
+                .retain(|category| category.name != name);
+            if categories.categories.len() == before {
+                bail!("no category {name}");
+            }
+        }
+    }
+    client.call(Request::SetCategories(categories)).await?;
     Ok(ExitCode::SUCCESS)
 }

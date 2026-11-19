@@ -48,6 +48,7 @@ async fn client_command(
         Command::Watch => jobs::watch(&mut client).await,
         Command::Queue(command) => jobs::queue(&mut client, command).await,
         Command::Schedule(command) => jobs::schedule(&mut client, command).await,
+        Command::Category(command) => jobs::category(&mut client, command).await,
         Command::Stop => jobs::stop(&mut client).await,
         Command::Get(_) | Command::Info(_) | Command::Daemon(_) => unreachable!("handled in main"),
     }

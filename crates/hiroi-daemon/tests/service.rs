@@ -350,3 +350,49 @@ async fn holding_a_queue_pauses_its_jobs_and_survives_restarts() {
         .unwrap();
     wait_for(&mut client, id, JobStatus::Completed).await;
 }
+
+#[tokio::test]
+async fn categories_sort_files_and_duplicates_are_refused() {
+    let server = TestServer::start(Behavior::default()).await;
+    server.put("clip.mp4", content(4096, 7));
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+
+    let id = add(
+        &mut client,
+        NewJob {
+            url: server.url("clip.mp4"),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    wait_for(&mut client, id, JobStatus::Completed).await;
+    assert!(fixture.downloads().join("Videos").join("clip.mp4").exists());
+
+    let again = client
+        .call(Request::Add(NewJob {
+            url: server.url("clip.mp4"),
+            ..NewJob::default()
+        }))
+        .await;
+    assert!(
+        again
+            .unwrap_err()
+            .to_string()
+            .contains("already in the list")
+    );
+    let forced = NewJob {
+        url: server.url("clip.mp4"),
+        allow_duplicate: true,
+        ..NewJob::default()
+    };
+    let second = add(&mut client, forced).await;
+    wait_for(&mut client, second, JobStatus::Completed).await;
+    assert!(
+        fixture
+            .downloads()
+            .join("Videos")
+            .join("clip (1).mp4")
+            .exists()
+    );
+}

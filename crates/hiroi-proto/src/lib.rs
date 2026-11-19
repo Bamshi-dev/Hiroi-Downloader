@@ -88,6 +88,8 @@ pub enum Request {
     StopQueue {
         queue: String,
     },
+    Categories,
+    SetCategories(Categories),
     Schedules,
     AddSchedule(Schedule),
     RemoveSchedule {
@@ -121,6 +123,24 @@ pub struct NewJob {
     /// Extra request headers, cookies included. The service keeps them
     /// in memory only and never writes them to disk.
     pub headers: Vec<(String, String)>,
+    /// Add the job even if the same file is already in the list.
+    pub allow_duplicate: bool,
+}
+
+/// Files whose extension matches go into `folder` (relative to the
+/// service's download folder) when a job names no folder of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Category {
+    pub name: String,
+    /// Lower case, without the dot.
+    pub extensions: Vec<String>,
+    pub folder: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Categories {
+    pub enabled: bool,
+    pub categories: Vec<Category>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,6 +265,7 @@ pub enum Response {
     Job { job: Box<Job> },
     Queues { queues: Vec<QueueInfo> },
     Schedules { schedules: Vec<Schedule> },
+    Categories(Categories),
     ScheduleAdded { id: i64 },
     Done,
 }

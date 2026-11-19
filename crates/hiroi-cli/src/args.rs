@@ -57,6 +57,9 @@ pub enum Command {
     /// Start or hold queues and limit the speed at set times.
     #[command(subcommand)]
     Schedule(ScheduleCommand),
+    /// Folders by file type for downloads that name no folder.
+    #[command(subcommand)]
+    Category(CategoryCommand),
     /// Stop the background service; running jobs continue next time.
     Stop,
 }
@@ -106,6 +109,10 @@ pub struct AddArgs {
     /// Start before other queued jobs.
     #[arg(long)]
     pub high_priority: bool,
+
+    /// Add even if the same file is already in the list.
+    #[arg(long)]
+    pub allow_duplicate: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -116,6 +123,28 @@ pub enum QueueCommand {
     Start { name: String },
     /// Hold a queue: its jobs pause and wait until it starts again.
     Stop { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CategoryCommand {
+    List,
+    /// Sort new downloads into category folders.
+    On,
+    /// Save new downloads directly into the download folder.
+    Off,
+    /// Add or replace a category.
+    Set {
+        name: String,
+        /// Folder inside the download folder.
+        #[arg(long)]
+        folder: String,
+        /// Extensions, comma separated: mp4,mkv
+        #[arg(long, value_delimiter = ',', required = true)]
+        ext: Vec<String>,
+    },
+    Remove {
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

@@ -16,7 +16,8 @@ use hiroi_engine::{
     DownloadId, DownloadListener, DownloadSnapshot, Engine, EngineConfig, EngineError,
 };
 use hiroi_proto::{
-    Event, Job, JobId, JobStatus, NewJob, QueueInfo, Request, Response, Schedule, ScheduleAction,
+    Categories, Event, Job, JobId, JobStatus, NewJob, QueueInfo, Request, Response, Schedule,
+    ScheduleAction,
 };
 use hiroi_store::{InsertJob, JobUpdate, Store, StoreError, StoredJob};
 use parking_lot::Mutex;
@@ -24,7 +25,7 @@ use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::schedule::{self, Desired, Moment};
-use crate::{convert, paths, server};
+use crate::{category, convert, paths, server};
 
 /// How often the progress of running jobs is written to the database.
 const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(5);
@@ -32,6 +33,7 @@ const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 const EVENT_BUFFER: usize = 1024;
 const DEFAULT_QUEUE: &str = "main";
 const GLOBAL_LIMIT_KEY: &str = "global_speed_limit";
+const CATEGORIES_KEY: &str = "categories";
 
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
@@ -138,6 +140,7 @@ struct State {
     last_desired: Option<Desired>,
     /// The speed limit set by the user; windows may lower it for a while.
     base_limit: Option<u64>,
+    categories: Option<Categories>,
 }
 
 enum Write {
@@ -186,16 +189,18 @@ impl Service {
     /// paused and failed ones without starting.
     async fn restore(&self) -> Result<(), DaemonError> {
         let store = Arc::clone(&self.store);
-        let (rows, limit, stopped, schedules) = tokio::task::spawn_blocking(move || {
-            Ok::<_, StoreError>((
-                store.jobs()?,
-                store.setting(GLOBAL_LIMIT_KEY)?,
-                store.stopped_queues()?,
-                store.schedules()?,
-            ))
-        })
-        .await
-        .expect("store task panicked")?;
+        let (rows, limit, stopped, schedules, categories) =
+            tokio::task::spawn_blocking(move || {
+                Ok::<_, StoreError>((
+                    store.jobs()?,
+                    store.setting(GLOBAL_LIMIT_KEY)?,
+                    store.stopped_queues()?,
+                    store.schedules()?,
+                    store.setting(CATEGORIES_KEY)?,
+                ))
+            })
+            .await
+            .expect("store task panicked")?;
         let limit = limit.and_then(|value| value.parse().ok());
         self.engine.set_global_speed_limit(limit);
         {
@@ -203,6 +208,7 @@ impl Service {
             state.base_limit = limit;
             state.stopped = stopped.into_iter().collect();
             state.schedules = schedules;
+            state.categories = categories.and_then(|json| serde_json::from_str(&json).ok());
         }
         for row in rows {
             let id = row.id;
@@ -293,6 +299,15 @@ impl Service {
                 self.set_queue_running(&queue, false);
                 Ok(Response::Done)
             }
+            Request::Categories => Ok(Response::Categories(self.categories())),
+            Request::SetCategories(categories) => {
+                let json = serde_json::to_string(&categories).expect("plain data serializes");
+                self.state.lock().categories = Some(categories);
+                let _ = self
+                    .writes
+                    .send(Write::Setting(CATEGORIES_KEY.into(), json));
+                Ok(Response::Done)
+            }
             Request::Schedules => Ok(Response::Schedules {
                 schedules: self.state.lock().schedules.clone(),
             }),
@@ -311,8 +326,26 @@ impl Service {
     }
 
     async fn add(&self, mut job: NewJob) -> Result<JobId, String> {
-        let dir = job.dir.take().unwrap_or_else(|| self.default_dir.clone());
+        let dir = match job.dir.take() {
+            Some(dir) => dir,
+            None => {
+                let name = job
+                    .file_name
+                    .clone()
+                    .or_else(|| category::name_from_url(&job.url));
+                category::folder_for(&self.categories(), &self.default_dir, name.as_deref())
+            }
+        };
         convert::validate(&job, &dir).map_err(|e| e.to_string())?;
+        if !job.allow_duplicate
+            && let Some(existing) = self.duplicate_of(&job.url, &dir, job.file_name.as_deref())
+        {
+            return Err(format!(
+                "already in the list as job {} ({}); add it with --allow-duplicate to download it again",
+                existing.id,
+                existing.status.as_str()
+            ));
+        }
         let insert = InsertJob {
             url: convert::strip_credentials(&job.url),
             mirrors: job
@@ -366,6 +399,36 @@ impl Service {
         self.load(&in_memory, &job.headers, !job.paused);
         self.publish(id);
         Ok(id)
+    }
+
+    fn categories(&self) -> Categories {
+        self.state
+            .lock()
+            .categories
+            .clone()
+            .unwrap_or_else(category::defaults)
+    }
+
+    /// A job that is not cancelled and fetches the same file into the
+    /// same place. URLs are compared without credentials and query
+    /// string, since signed links differ on every copy.
+    fn duplicate_of(
+        &self,
+        url: &str,
+        dir: &std::path::Path,
+        file_name: Option<&str>,
+    ) -> Option<StoredJob> {
+        let key = convert::display_url(url);
+        let state = self.state.lock();
+        state
+            .rows
+            .values()
+            .filter(|row| row.status != JobStatus::Cancelled && row.dir == dir)
+            .find(|row| {
+                convert::display_url(&row.url) == key
+                    && row.options.file_name.as_deref() == file_name
+            })
+            .cloned()
     }
 
     fn jobs(&self) -> Vec<Job> {
