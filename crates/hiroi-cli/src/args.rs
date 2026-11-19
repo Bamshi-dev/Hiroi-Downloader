@@ -60,6 +60,15 @@ pub enum Command {
     /// Folders by file type for downloads that name no folder.
     #[command(subcommand)]
     Category(CategoryCommand),
+    /// Offer copied download links to the service.
+    Clipboard {
+        /// Add links without asking.
+        #[arg(long)]
+        auto: bool,
+        /// Seconds between clipboard checks.
+        #[arg(long, default_value_t = 1.0)]
+        interval: f64,
+    },
     /// Desktop notifications when downloads finish.
     Notifications { state: Switch },
     /// Power the computer off once every download is done.

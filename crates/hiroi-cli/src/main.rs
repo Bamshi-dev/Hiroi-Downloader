@@ -49,6 +49,10 @@ async fn client_command(
         Command::Queue(command) => jobs::queue(&mut client, command).await,
         Command::Schedule(command) => jobs::schedule(&mut client, command).await,
         Command::Category(command) => jobs::category(&mut client, command).await,
+        Command::Clipboard { auto, interval } => {
+            let interval = std::time::Duration::from_secs_f64(interval.clamp(0.2, 60.0));
+            commands::clipboard::run(&mut client, auto, interval).await
+        }
         Command::Notifications { state } => {
             let enabled = matches!(state, args::Switch::On);
             jobs::switch(
