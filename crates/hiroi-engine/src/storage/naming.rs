@@ -32,12 +32,33 @@ pub fn sanitize_file_name(raw: &str) -> Option<String> {
     if trimmed.is_empty() || trimmed.chars().all(|c| c == '.') {
         return None;
     }
-    let name = if trimmed.starts_with('.') {
+    let name = if trimmed.starts_with('.') || is_reserved_on_windows(trimmed) {
         format!("_{trimmed}")
     } else {
         trimmed.to_string()
     };
     Some(truncate(&name, MAX_FILE_NAME_BYTES - RESERVED_SUFFIX_BYTES))
+}
+
+/// Windows refuses files named after devices (`CON`, `NUL`, `COM1`,
+/// ...), with any extension. We avoid them everywhere, so a folder of
+/// downloads can be copied to Windows as it is.
+fn is_reserved_on_windows(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).trim_end();
+    let upper = stem.to_ascii_uppercase();
+    let numbered = |prefix: &str| {
+        upper.strip_prefix(prefix).is_some_and(|rest| {
+            matches!(
+                rest,
+                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    };
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || numbered("COM")
+        || numbered("LPT")
 }
 
 pub(crate) fn file_name_from_url(url: &Url) -> Option<String> {
@@ -125,6 +146,19 @@ mod tests {
     #[test]
     fn neutralizes_hidden_and_odd_characters() {
         assert_eq!(sanitize_file_name(".bashrc").as_deref(), Some("_.bashrc"));
+        assert_eq!(sanitize_file_name("nul.txt").as_deref(), Some("_nul.txt"));
+        assert_eq!(
+            sanitize_file_name("COM3.tar.gz").as_deref(),
+            Some("_COM3.tar.gz")
+        );
+        assert_eq!(
+            sanitize_file_name("console.log").as_deref(),
+            Some("console.log")
+        );
+        assert_eq!(
+            sanitize_file_name("LPT10.bin").as_deref(),
+            Some("LPT10.bin")
+        );
         assert_eq!(
             sanitize_file_name("a\u{0}b\nc.txt").as_deref(),
             Some("a_b_c.txt")
