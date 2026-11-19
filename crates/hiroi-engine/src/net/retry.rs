@@ -46,6 +46,9 @@ pub(crate) enum FetchError {
     },
     /// The server closed the connection before sending the whole range.
     ClosedEarly,
+    /// The connection was much slower than it should be and was dropped
+    /// to try a fresh one.
+    Slow,
     /// A ranged request got the whole file (`If-Range` mismatch or ranges
     /// ignored) or a 416: this is no longer the file we started with.
     Changed,
@@ -69,6 +72,7 @@ impl fmt::Display for FetchError {
             Self::Transport(error) => write!(f, "{}", describe_transport(error)),
             Self::Status { status, .. } => write!(f, "server answered {status}"),
             Self::ClosedEarly => f.write_str("connection closed early"),
+            Self::Slow => f.write_str("connection too slow, reconnecting"),
             Self::Changed => f.write_str("file changed on the server"),
             Self::Protocol(message) => f.write_str(message),
             Self::Fatal(error) => write!(f, "{error}"),
@@ -86,6 +90,7 @@ impl FetchError {
                 url: url.to_string(),
             },
             Self::ClosedEarly => EngineError::Protocol("connection closed early".into()),
+            Self::Slow => EngineError::Protocol("connection too slow".into()),
             Self::Changed => EngineError::RemoteChanged,
             Self::Protocol(message) => EngineError::Protocol(message),
             Self::Fatal(error) => error,
@@ -125,6 +130,8 @@ impl RetryPolicy {
             FetchError::Changed | FetchError::Protocol(_) => RetryAction::DropSource,
             FetchError::Transport(error) if error.is_redirect() => RetryAction::DropSource,
             FetchError::Transport(_) | FetchError::ClosedEarly => self.retry_or_drop(attempt, None),
+            // Reconnecting right away is the point; the connection made progress.
+            FetchError::Slow => RetryAction::Retry(Duration::ZERO),
             FetchError::Status {
                 status,
                 retry_after,

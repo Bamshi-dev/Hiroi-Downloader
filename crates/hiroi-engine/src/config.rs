@@ -30,6 +30,14 @@ pub struct EngineConfig {
     /// Follow redirects from HTTPS to plain HTTP. Off by default: such a
     /// redirect exposes the download to tampering on the network.
     pub allow_insecure_redirects: bool,
+    /// Reconnect connections that are far slower than the others of the
+    /// same download, so the last segment does not hold everything up.
+    pub replace_slow_connections: bool,
+    /// Reconnect any connection slower than this (bytes per second),
+    /// regardless of the others. `None` disables the absolute limit.
+    pub min_connection_speed: Option<u64>,
+    /// Window over which connection speeds are compared.
+    pub slow_connection_window: Duration,
     pub checkpoint_interval: Duration,
     pub progress_interval: Duration,
 }
@@ -50,6 +58,9 @@ impl Default for EngineConfig {
             min_split_size: constants::MIN_SPLIT_SIZE,
             preallocate: true,
             allow_insecure_redirects: false,
+            replace_slow_connections: true,
+            min_connection_speed: None,
+            slow_connection_window: constants::SLOW_CONNECTION_WINDOW,
             checkpoint_interval: constants::CHECKPOINT_INTERVAL,
             progress_interval: constants::PROGRESS_INTERVAL,
         }
@@ -67,6 +78,8 @@ impl EngineConfig {
             .clamp(1, constants::MAX_CONNECTIONS);
         self.min_split_size = self.min_split_size.max(64 * 1024);
         self.global_speed_limit = self.global_speed_limit.filter(|&limit| limit > 0);
+        self.min_connection_speed = self.min_connection_speed.filter(|&speed| speed > 0);
+        self.slow_connection_window = self.slow_connection_window.max(Duration::from_millis(500));
         self
     }
 }

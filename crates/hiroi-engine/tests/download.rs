@@ -117,11 +117,45 @@ async fn pause_and_resume_continue_where_they_stopped() {
 
     assert_eq!(snapshot.status, DownloadStatus::Completed);
     assert_eq!(std::fs::read(dir.path().join("big.bin")).unwrap(), data);
+    // "Served" counts bytes handed to the kernel. A connection that stops
+    // early leaves some of them unread in socket buffers, hence the slack.
+    // A download that started over would need at least `size` bytes.
     let served_again = server.bytes_served() - served_before;
+    let slack = 768 * KIB as u64;
+    assert!(paused_at >= MIB as u64);
     assert!(
-        served_again <= size as u64 - paused_at + 256 * KIB as u64,
+        served_again < size as u64 - paused_at + slack,
         "resume fetched {served_again} bytes although {paused_at} were already saved"
     );
+}
+
+#[tokio::test]
+async fn slow_connections_are_replaced() {
+    let data = content(2 * MIB, 30);
+    // Request 0 is the probe, request 1 the first segment: make it crawl.
+    let behavior = Behavior {
+        slow_requests: vec![1],
+        slow_rate: 16 * KIB as u64,
+        ..Behavior::default()
+    };
+    let server = TestServer::start(behavior).await;
+    server.put("tail.bin", data.clone());
+    let dir = tempfile::tempdir().unwrap();
+    let config = EngineConfig {
+        slow_connection_window: Duration::from_millis(500),
+        ..config()
+    };
+
+    let started = Instant::now();
+    let request = request(&server, "tail.bin", dir.path()).connections(2);
+    let snapshot = run(&Engine::new(config).unwrap(), request).await;
+
+    assert_eq!(snapshot.status, DownloadStatus::Completed);
+    assert_eq!(std::fs::read(dir.path().join("tail.bin")).unwrap(), data);
+    // Left alone, the slow connection keeps the download busy for about
+    // four seconds; a fresh connection finishes in about one.
+    let elapsed = started.elapsed();
+    assert!(elapsed < Duration::from_millis(2500), "took {elapsed:?}");
 }
 
 #[tokio::test]

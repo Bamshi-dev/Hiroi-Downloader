@@ -28,6 +28,10 @@ pub struct Behavior {
     pub max_connections: Option<usize>,
     pub retry_after_secs: u64,
     pub content_disposition: Option<String>,
+    /// Requests (counted from 0, probes included) that are served at
+    /// `slow_rate` bytes per second instead of `bytes_per_sec`.
+    pub slow_requests: Vec<usize>,
+    pub slow_rate: u64,
 }
 
 impl Default for Behavior {
@@ -39,6 +43,8 @@ impl Default for Behavior {
             max_connections: None,
             retry_after_secs: 1,
             content_disposition: None,
+            slow_requests: Vec::new(),
+            slow_rate: 16 * 1024,
         }
     }
 }
@@ -157,8 +163,11 @@ async fn serve(
     Path(name): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    state.requests.fetch_add(1, Ordering::Relaxed);
-    let behavior = state.behavior.lock().unwrap().clone();
+    let index = state.requests.fetch_add(1, Ordering::Relaxed);
+    let mut behavior = state.behavior.lock().unwrap().clone();
+    if behavior.slow_requests.contains(&index) {
+        behavior.bytes_per_sec = Some(behavior.slow_rate);
+    }
     let Some(file) = state.files.lock().unwrap().get(&name).cloned() else {
         return empty(StatusCode::NOT_FOUND);
     };

@@ -33,6 +33,12 @@ pub const DEFAULT_THROTTLE_PAUSE: Duration = Duration::from_secs(2);
 /// After this long without throttling, a host may get one connection back.
 pub const HOST_RECOVERY_WINDOW: Duration = Duration::from_secs(60);
 
+/// Window over which each connection's speed is measured.
+pub const SLOW_CONNECTION_WINDOW: Duration = Duration::from_secs(10);
+/// A connection is replaced when it is this many times slower than the
+/// average of the other connections of the same download.
+pub const SLOW_CONNECTION_RATIO: u64 = 5;
+
 /// How often progress is flushed to disk and the control file is rewritten.
 pub const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(2);
 /// How often listeners receive progress updates.

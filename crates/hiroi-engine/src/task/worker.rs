@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use futures_util::StreamExt;
 use reqwest::header::{CONTENT_RANGE, IF_RANGE, RANGE};
@@ -10,7 +11,7 @@ use reqwest::{Response, StatusCode};
 use super::or_cancel;
 use super::segmented::Transfer;
 use super::segments::Segment;
-use crate::constants::{DEFAULT_THROTTLE_PAUSE, WRITE_BUFFER_SIZE};
+use crate::constants::{DEFAULT_THROTTLE_PAUSE, SLOW_CONNECTION_RATIO, WRITE_BUFFER_SIZE};
 use crate::error::Result;
 use crate::net::headers::parse_content_range;
 use crate::net::probe::{self, retry_after};
@@ -18,9 +19,10 @@ use crate::net::retry::{FetchError, FetchResult, RetryAction, is_throttle};
 use crate::net::source::Source;
 
 /// Keeps taking segments until there is nothing left worth taking.
-pub(super) async fn run(transfer: Arc<Transfer>) -> Result<()> {
+/// `slot` identifies the connection in the speed table of the transfer.
+pub(super) async fn run(transfer: Arc<Transfer>, slot: usize) -> Result<()> {
     while let Some(segment) = transfer.table.claim() {
-        let result = download_segment(&transfer, &segment).await;
+        let result = download_segment(&transfer, &segment, slot).await;
         segment.release();
         result?;
     }
@@ -28,7 +30,7 @@ pub(super) async fn run(transfer: Arc<Transfer>) -> Result<()> {
 }
 
 /// Fetches one segment, retrying and switching sources as the policy says.
-async fn download_segment(transfer: &Transfer, segment: &Segment) -> Result<()> {
+async fn download_segment(transfer: &Transfer, segment: &Segment, slot: usize) -> Result<()> {
     let policy = &transfer.ctx.shared.config.retry;
     let mut attempt = 0;
     loop {
@@ -37,7 +39,7 @@ async fn download_segment(transfer: &Transfer, segment: &Segment) -> Result<()> 
             .pick()
             .ok_or_else(|| transfer.pool.exhausted())?;
         let before = segment.written();
-        let error = match fetch(transfer, segment, &source).await {
+        let error = match fetch(transfer, segment, &source, slot).await {
             Ok(()) => return Ok(()),
             Err(error) => error,
         };
@@ -76,7 +78,12 @@ async fn download_segment(transfer: &Transfer, segment: &Segment) -> Result<()> 
 }
 
 /// One ranged request for whatever is still missing of the segment.
-async fn fetch(transfer: &Transfer, segment: &Segment, source: &Arc<Source>) -> FetchResult<()> {
+async fn fetch(
+    transfer: &Transfer,
+    segment: &Segment,
+    source: &Arc<Source>,
+    slot: usize,
+) -> FetchResult<()> {
     let Some((start, end)) = segment.begin() else {
         return Ok(());
     };
@@ -119,7 +126,7 @@ async fn fetch(transfer: &Transfer, segment: &Segment, source: &Arc<Source>) -> 
         }
     }
     check_range(&response, start, transfer.total_size)?;
-    receive(transfer, segment, response).await
+    receive(transfer, segment, response, slot).await
 }
 
 /// The server must send exactly the bytes we asked for, of the file we know.
@@ -143,10 +150,16 @@ fn check_range(response: &Response, start: u64, total_size: u64) -> FetchResult<
     Ok(())
 }
 
-async fn receive(transfer: &Transfer, segment: &Segment, response: Response) -> FetchResult<()> {
+async fn receive(
+    transfer: &Transfer,
+    segment: &Segment,
+    response: Response,
+    slot: usize,
+) -> FetchResult<()> {
     let ctx = &transfer.ctx;
     let mut body = response.bytes_stream();
     let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
+    let mut speed = SpeedCheck::new(transfer, slot);
 
     let outcome = loop {
         let next = tokio::select! {
@@ -177,6 +190,10 @@ async fn receive(transfer: &Transfer, segment: &Segment, response: Response) -> 
         // Done, or another connection took over the rest of this segment.
         if segment.fully_reserved() {
             break Ok(());
+        }
+        if speed.record(accepted, segment) {
+            tracing::debug!(slot, "replacing a slow connection");
+            break Err(FetchError::Slow);
         }
     };
 
@@ -216,6 +233,103 @@ async fn refresh(transfer: &Transfer, source: &Source) -> Result<bool> {
         source.refresh_to(fresh.final_url);
     }
     Ok(same_file)
+}
+
+/// Measures the speed of one connection over fixed windows and decides
+/// when it is slow enough to be worth a fresh connection.
+struct SpeedCheck<'a> {
+    transfer: &'a Transfer,
+    slot: usize,
+    window_start: Instant,
+    window_bytes: u64,
+    opened: Instant,
+    total: u64,
+    flagged: bool,
+}
+
+/// Connections that moved less than this say little about the server.
+const MIN_REFERENCE_BYTES: u64 = 64 * 1024;
+
+impl<'a> SpeedCheck<'a> {
+    fn new(transfer: &'a Transfer, slot: usize) -> Self {
+        let now = Instant::now();
+        Self {
+            transfer,
+            slot,
+            window_start: now,
+            window_bytes: 0,
+            opened: now,
+            total: 0,
+            flagged: false,
+        }
+    }
+
+    /// Records `len` received bytes. Returns true when the connection
+    /// should be dropped.
+    fn record(&mut self, len: usize, segment: &Segment) -> bool {
+        self.window_bytes += len as u64;
+        self.total += len as u64;
+        let elapsed = self.window_start.elapsed();
+        let config = &self.transfer.ctx.shared.config;
+        if elapsed < config.slow_connection_window {
+            return false;
+        }
+        let rate = (self.window_bytes as f64 / elapsed.as_secs_f64()) as u64;
+        self.transfer.rates[self.slot].store(rate.max(1), Ordering::Relaxed);
+        self.window_start = Instant::now();
+        self.window_bytes = 0;
+
+        // Reconnecting costs a round trip; only worth it when this
+        // connection would need more than another window to finish.
+        let window = config.slow_connection_window.as_secs_f64();
+        let still_long = segment.unreserved() as f64 > rate as f64 * window;
+        self.flagged = still_long && self.is_slow(rate);
+        self.flagged
+    }
+
+    fn is_slow(&self, rate: u64) -> bool {
+        let ctx = &self.transfer.ctx;
+        let config = &ctx.shared.config;
+        // Our own speed limit slows connections on purpose.
+        let limited = ctx.rate.limit().is_some() || ctx.shared.global_rate.limit().is_some();
+        if !config.replace_slow_connections || limited {
+            return false;
+        }
+        if config.min_connection_speed.is_some_and(|min| rate < min) {
+            return true;
+        }
+        let others: Vec<u64> = self
+            .transfer
+            .rates
+            .iter()
+            .enumerate()
+            .filter(|&(slot, _)| slot != self.slot)
+            .map(|(_, rate)| rate.load(Ordering::Relaxed))
+            .filter(|&rate| rate > 0)
+            .collect();
+        let expected = if others.is_empty() {
+            self.transfer.reference_rate.load(Ordering::Relaxed)
+        } else {
+            others.iter().sum::<u64>() / others.len() as u64
+        };
+        expected > 0 && rate.saturating_mul(SLOW_CONNECTION_RATIO) < expected
+    }
+}
+
+impl Drop for SpeedCheck<'_> {
+    fn drop(&mut self) {
+        self.transfer.rates[self.slot].store(0, Ordering::Relaxed);
+        let elapsed = self.opened.elapsed().as_secs_f64();
+        if self.flagged || self.total < MIN_REFERENCE_BYTES || elapsed <= 0.0 {
+            return;
+        }
+        // Moving average over finished connections, newest weighted 1/4.
+        let rate = (self.total as f64 / elapsed) as u64;
+        let reference = &self.transfer.reference_rate;
+        let old = reference.load(Ordering::Relaxed);
+        let new = if old == 0 { rate } else { (old * 3 + rate) / 4 };
+        reference.store(new, Ordering::Relaxed);
+    }
 }
 
 /// Counts connections that are transferring right now.

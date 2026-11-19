@@ -88,7 +88,8 @@ impl Segment {
         self.state.lock().claimed = false;
     }
 
-    fn unreserved(&self) -> u64 {
+    /// Bytes of this segment no connection has received yet.
+    pub fn unreserved(&self) -> u64 {
         let state = self.state.lock();
         state.end.saturating_sub(self.start + state.reserved)
     }

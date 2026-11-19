@@ -1,7 +1,7 @@
 //! Multi-connection download of a file whose server supports ranges.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use tokio::task::JoinSet;
 use tokio::time::{MissedTickBehavior, interval};
@@ -26,6 +26,11 @@ pub(super) struct Transfer {
     pub file: OutputFile,
     pub total_size: u64,
     pub active: AtomicUsize,
+    /// Recent speed of each connection slot, 0 while idle.
+    pub rates: Vec<AtomicU64>,
+    /// Typical speed of connections that finished their work, so a slow
+    /// connection can be judged even when it is the last one running.
+    pub reference_rate: AtomicU64,
     /// Child of the task's token: also cancelled when one connection fails
     /// for good, so the others stop too.
     pub cancel: CancellationToken,
@@ -62,14 +67,16 @@ pub(super) async fn download(
         file,
         total_size,
         active: AtomicUsize::new(0),
+        rates: (0..connections).map(|_| AtomicU64::new(0)).collect(),
+        reference_rate: AtomicU64::new(0),
         cancel: ctx.cancel.child_token(),
     });
     // Save the starting layout right away, so even an early crash resumes.
     checkpoint(&transfer, &control, plan).await?;
 
     let mut workers = JoinSet::new();
-    for _ in 0..connections {
-        workers.spawn(worker::run(Arc::clone(&transfer)));
+    for slot in 0..connections {
+        workers.spawn(worker::run(Arc::clone(&transfer), slot));
     }
     let result = supervise(&transfer, &mut workers, &control, plan).await;
     let saved = checkpoint(&transfer, &control, plan).await;
