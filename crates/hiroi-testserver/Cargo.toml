@@ -11,6 +11,8 @@ publish = false
 axum.workspace = true
 fastrand.workspace = true
 futures-util.workspace = true
+hex.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 
 [lints]
