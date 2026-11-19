@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use reqwest::header::{
-    ACCEPT, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderMap, HeaderValue, RANGE,
+    ACCEPT, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, RANGE,
 };
 use reqwest::redirect::Policy;
 use reqwest::{Client, StatusCode, Url};
@@ -53,7 +53,7 @@ pub struct GrabOptions {
     pub user_agent: String,
     pub proxy: Option<String>,
     /// Sent with every request: cookies, referer, and so on.
-    pub headers: HeaderMap,
+    pub headers: Vec<(String, String)>,
     pub timeout: Duration,
 }
 
@@ -71,7 +71,7 @@ impl Default for GrabOptions {
                 env!("CARGO_PKG_VERSION")
             ),
             proxy: None,
-            headers: HeaderMap::new(),
+            headers: Vec::new(),
             timeout: Duration::from_secs(20),
         }
     }
@@ -122,6 +122,8 @@ pub enum GrabError {
     Scheme,
     #[error("invalid proxy: {0}")]
     Proxy(String),
+    #[error("invalid header `{0}`")]
+    Header(String),
     #[error("could not read {url}: {reason}")]
     Page { url: String, reason: String },
 }
@@ -134,9 +136,17 @@ pub struct Grabber {
 
 impl Grabber {
     pub fn new(options: GrabOptions) -> Result<Self, GrabError> {
+        let mut headers = HeaderMap::new();
+        for (name, value) in &options.headers {
+            let bad = || GrabError::Header(name.clone());
+            let name = HeaderName::from_bytes(name.trim().as_bytes()).map_err(|_| bad())?;
+            let mut value = HeaderValue::from_str(value.trim()).map_err(|_| bad())?;
+            value.set_sensitive(true);
+            headers.insert(name, value);
+        }
         let mut builder = Client::builder()
             .user_agent(options.user_agent.as_str())
-            .default_headers(options.headers.clone())
+            .default_headers(headers)
             .connect_timeout(Duration::from_secs(15))
             .read_timeout(options.timeout)
             .redirect(Policy::custom(|attempt| {

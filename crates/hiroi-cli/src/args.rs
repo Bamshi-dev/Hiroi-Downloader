@@ -33,6 +33,9 @@ pub enum Command {
     Get(GetArgs),
     /// Ask the servers about a file without downloading it.
     Info(InfoArgs),
+    /// List what a web page offers (files, pictures, videos, streams),
+    /// choose, and download.
+    Grab(GrabArgs),
     /// Run the background service in the foreground.
     Daemon(DaemonArgs),
     /// Add downloads to the background service.
@@ -75,6 +78,90 @@ pub enum Command {
     PowerOffWhenDone { state: Switch },
     /// Stop the background service; running jobs continue next time.
     Stop,
+}
+
+#[derive(Debug, Args)]
+pub struct GrabArgs {
+    /// The page to read.
+    #[arg(value_name = "URL")]
+    pub url: String,
+
+    /// Also read pages it links to, this many levels deep.
+    #[arg(long, default_value_t = 0)]
+    pub depth: u32,
+
+    /// Follow links to other sites too.
+    #[arg(long)]
+    pub other_hosts: bool,
+
+    /// Stop after reading this many pages.
+    #[arg(long, value_name = "N", default_value_t = 50)]
+    pub max_pages: usize,
+
+    /// Ignore robots.txt while following links (be considerate).
+    #[arg(long)]
+    pub ignore_robots: bool,
+
+    /// Only these types: video, audio, image, stream, archive, document,
+    /// program, disk-image, subtitle, torrent, metalink, other.
+    #[arg(
+        short = 't',
+        long = "type",
+        value_name = "TYPES",
+        value_delimiter = ','
+    )]
+    pub kinds: Vec<String>,
+
+    /// Only these extensions, e.g. mp4,zip.
+    #[arg(long = "ext", value_name = "EXTS", value_delimiter = ',')]
+    pub extensions: Vec<String>,
+
+    /// Only links whose URL or text contains this.
+    #[arg(long, value_name = "TEXT")]
+    pub contains: Option<String>,
+
+    /// Ask each server for size and type first (needed for size filters).
+    #[arg(long)]
+    pub probe: bool,
+
+    #[arg(long, value_name = "SIZE", value_parser = parse_rate)]
+    pub min_size: Option<u64>,
+
+    #[arg(long, value_name = "SIZE", value_parser = parse_rate)]
+    pub max_size: Option<u64>,
+
+    /// Only list what was found.
+    #[arg(long)]
+    pub list: bool,
+
+    /// Download everything that matches.
+    #[arg(long, conflicts_with_all = ["first", "pick"])]
+    pub all: bool,
+
+    /// Download the first N matches.
+    #[arg(long, value_name = "N", conflicts_with = "pick")]
+    pub first: Option<usize>,
+
+    /// Download these, by number: 1,3,5-9.
+    #[arg(long, value_name = "LIST")]
+    pub pick: Option<String>,
+
+    /// Send the chosen links to the background service instead.
+    #[arg(long)]
+    pub queue: bool,
+
+    /// Downloads running at the same time.
+    #[arg(short, long, default_value_t = 3)]
+    pub jobs: usize,
+
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    #[command(flatten)]
+    pub request: RequestArgs,
+
+    #[command(flatten)]
+    pub engine: EngineArgs,
 }
 
 #[derive(Debug, Args)]

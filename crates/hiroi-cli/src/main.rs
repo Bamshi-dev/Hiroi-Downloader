@@ -21,6 +21,7 @@ async fn main() -> ExitCode {
     let result = match cli.command {
         Command::Get(args) => commands::get::run(args, verbose).await,
         Command::Info(args) => commands::info::run(args).await,
+        Command::Grab(args) => commands::grab::run(args, cli.socket, verbose).await,
         Command::Daemon(args) => commands::daemon::run(args, cli.socket).await,
         command => client_command(command, cli.socket).await,
     };
@@ -70,7 +71,9 @@ async fn client_command(
             .await
         }
         Command::Stop => jobs::stop(&mut client).await,
-        Command::Get(_) | Command::Info(_) | Command::Daemon(_) => unreachable!("handled in main"),
+        Command::Get(_) | Command::Info(_) | Command::Grab(_) | Command::Daemon(_) => {
+            unreachable!("handled in main")
+        }
     }
 }
 

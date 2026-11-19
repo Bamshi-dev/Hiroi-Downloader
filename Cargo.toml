@@ -18,6 +18,7 @@ hiroi-testserver = { path = "crates/hiroi-testserver" }
 
 anyhow = "1"
 axum = "0.8"
+dialoguer = { version = "0.12", default-features = false }
 directories = "6"
 jiff = "1"
 lol_html = "3"

@@ -27,10 +27,6 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
     let mut config = options::engine_config(&args.engine);
     config.max_active_downloads = args.jobs;
     config.global_speed_limit = args.global_limit;
-    let engine = Engine::new(config)?;
-    let view = Arc::new(ProgressView::new(args.quiet || verbose));
-    engine.add_listener(view.clone());
-
     let requests = urls
         .iter()
         .map(|url| {
@@ -38,6 +34,20 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
                 .with_context(|| format!("bad download `{url}`"))
         })
         .collect::<Result<Vec<_>>>()?;
+    download(config, requests, args.quiet || verbose, args.quiet).await
+}
+
+/// Downloads `requests` in the foreground with progress bars. Ctrl+C
+/// pauses everything and saves it.
+pub async fn download(
+    config: hiroi_engine::EngineConfig,
+    requests: Vec<hiroi_engine::DownloadRequest>,
+    hide_bars: bool,
+    quiet: bool,
+) -> Result<ExitCode> {
+    let engine = Engine::new(config)?;
+    let view = Arc::new(ProgressView::new(hide_bars));
+    engine.add_listener(view.clone());
     let ids: Vec<DownloadId> = requests
         .into_iter()
         .map(|request| engine.add(request))
@@ -53,7 +63,7 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
         view.note("Paused. Run the same command again to resume.");
         return Ok(ExitCode::from(EXIT_INTERRUPTED));
     }
-    Ok(report(&engine, &ids, &view, args.quiet))
+    Ok(report(&engine, &ids, &view, quiet))
 }
 
 pub fn collect_urls(urls: &[String], input: Option<&std::path::Path>) -> Result<Vec<String>> {
