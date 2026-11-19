@@ -436,20 +436,25 @@ async fn reporting<T>(
 ) -> Result<T> {
     let mut meter = SpeedMeter::new(progress.bytes.load(Ordering::Relaxed));
     let mut tick = tokio::time::interval(ctx.shared.config.progress_interval);
+    let update = |meter: &mut SpeedMeter| {
+        let downloaded = progress.bytes.load(Ordering::Relaxed);
+        let speed = meter.sample(downloaded);
+        ctx.progress.update(|p| {
+            p.downloaded = downloaded;
+            p.speed = speed;
+            p.connections = ctx.shared.config.default_connections.min(16);
+        });
+        ctx.observer.progress(ctx.id);
+    };
     tokio::pin!(work);
     loop {
         tokio::select! {
-            result = &mut work => return result,
-            _ = tick.tick() => {
-                let downloaded = progress.bytes.load(Ordering::Relaxed);
-                let speed = meter.sample(downloaded);
-                ctx.progress.update(|p| {
-                    p.downloaded = downloaded;
-                    p.speed = speed;
-                    p.connections = ctx.shared.config.default_connections.min(16);
-                });
-                ctx.observer.progress(ctx.id);
+            result = &mut work => {
+                // The last pieces may have landed since the last tick.
+                update(&mut meter);
+                return result;
             }
+            _ = tick.tick() => update(&mut meter),
         }
     }
 }

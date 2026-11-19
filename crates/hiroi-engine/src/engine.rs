@@ -315,6 +315,12 @@ impl EngineInner {
     }
 
     fn finish(self: &Arc<Self>, id: DownloadId, result: Result<PathBuf>) {
+        // Streams and joined tracks only know their size once written.
+        let size = result
+            .as_ref()
+            .ok()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.len());
         let (snapshot, error) = {
             let mut downloads = self.downloads.lock();
             let Some(entry) = downloads.get_mut(&id) else {
@@ -334,6 +340,7 @@ impl EngineInner {
             };
             if status == DownloadStatus::Completed {
                 entry.progress.update(|p| {
+                    p.total_size = size.or(p.total_size);
                     p.downloaded = p.total_size.unwrap_or(p.downloaded);
                     p.speed = 0;
                     p.eta = None;
