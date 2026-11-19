@@ -1,11 +1,12 @@
 //! Command-line arguments.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use hiroi_engine::ConflictPolicy;
+use hiroi_engine::{ConflictPolicy, Quality};
 
-use crate::size::parse_rate;
+use crate::size::{parse_duration, parse_rate};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -421,6 +422,14 @@ pub struct TargetArgs {
     /// What to do when the file already exists.
     #[arg(long, value_enum, default_value_t = Conflict::Rename)]
     pub on_conflict: Conflict,
+
+    /// Stream variant to fetch: best, worst, or a height such as 720.
+    #[arg(long, value_name = "QUALITY", default_value = "best")]
+    pub quality: Quality,
+
+    /// Stop recording a live stream after this long, e.g. 30m or 2h.
+    #[arg(long, value_name = "TIME", value_parser = parse_duration)]
+    pub live_limit: Option<Duration>,
 }
 
 /// What each request carries. Applies to one download.

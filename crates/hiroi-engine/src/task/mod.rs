@@ -1,6 +1,6 @@
 //! One download, from probing the servers to the finished file.
 
-mod meter;
+pub(crate) mod meter;
 mod segmented;
 mod segments;
 mod stream;
@@ -20,6 +20,9 @@ use crate::config::EngineConfig;
 use crate::error::{EngineError, Result};
 use crate::inspect;
 use crate::limit::{HostLimiter, RateLimiter};
+use crate::media;
+use crate::net::probe::RemoteFile;
+use crate::net::source::SourcePool;
 use crate::request::{ConflictPolicy, DownloadRequest};
 use crate::snapshot::{DownloadId, DownloadStatus, SegmentSnapshot};
 use crate::storage::file::{self, OutputFile};
@@ -96,6 +99,19 @@ pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     let on_retry = |reason: &str, delay| ctx.observer.retrying(ctx.id, reason, delay);
     let results = inspect::probe_all(&ctx.shared, &ctx.request, &ctx.cancel, &on_retry).await;
     let (pool, remote) = inspect::select(&ctx.request, results)?;
+    if let Some(kind) = media::detect(&remote) {
+        return media::download(&ctx, remote.final_url.clone(), kind).await;
+    }
+    download_file(&ctx, pool, remote).await
+}
+
+/// The regular path: one file, split across connections when the
+/// server allows it.
+pub(crate) async fn download_file(
+    ctx: &Arc<TaskContext>,
+    pool: SourcePool,
+    remote: RemoteFile,
+) -> Result<PathBuf> {
     let plan = plan::prepare(&ctx.request, &remote, &pool.key())?;
     let segmented = remote.ranges && remote.size.is_some_and(|size| size > 0);
 
@@ -114,11 +130,11 @@ pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
     let pool = Arc::new(pool);
     match remote.size {
         Some(0) => drop(OutputFile::open(&plan.paths.part_path, true)?),
-        Some(size) if segmented => segmented::download(&ctx, pool, size, &plan).await?,
-        size => stream::download(&ctx, &pool, size, &plan.paths).await?,
+        Some(size) if segmented => segmented::download(ctx, pool, size, &plan).await?,
+        size => stream::download(ctx, &pool, size, &plan.paths).await?,
     }
 
-    complete(&ctx, &plan).await
+    complete(ctx, &plan).await
 }
 
 /// Verifies the checksum, then gives the file its real name.

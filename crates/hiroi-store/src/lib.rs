@@ -18,7 +18,7 @@ mod migrations;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use hiroi_proto::{Conflict, JobId, JobStatus, Priority, Schedule};
+use hiroi_proto::{Conflict, JobId, JobStatus, Priority, Quality, Schedule};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +70,8 @@ pub struct JobOptions {
     pub priority: Option<Priority>,
     pub run_after: Option<Vec<String>>,
     pub open_folder: bool,
+    pub quality: Option<Quality>,
+    pub live_limit_secs: Option<u64>,
 }
 
 /// A job about to be inserted; the store assigns the id.

@@ -33,6 +33,7 @@ mod error;
 mod inspect;
 mod limit;
 mod listener;
+mod media;
 mod net;
 mod request;
 mod snapshot;
@@ -47,7 +48,7 @@ pub use error::{EngineError, Result};
 pub use inspect::{RemoteInfo, SourceInfo};
 pub use listener::DownloadListener;
 pub use net::retry::RetryPolicy;
-pub use request::{ConflictPolicy, DownloadRequest, Priority};
+pub use request::{ConflictPolicy, DownloadRequest, Priority, Quality, StreamOptions};
 /// URL type used throughout the API (re-exported from `reqwest`).
 pub use reqwest::Url;
 pub use snapshot::{DownloadId, DownloadSnapshot, DownloadStatus, SegmentSnapshot};

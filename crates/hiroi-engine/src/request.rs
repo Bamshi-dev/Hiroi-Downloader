@@ -18,6 +18,44 @@ pub enum ConflictPolicy {
     Skip,
 }
 
+/// Which variant of a stream to download, when it offers several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Quality {
+    #[default]
+    Best,
+    Worst,
+    /// The best variant no taller than this many pixels.
+    MaxHeight(u32),
+}
+
+impl std::str::FromStr for Quality {
+    type Err = String;
+
+    /// `best`, `worst`, or a height such as `720` or `720p`.
+    fn from_str(text: &str) -> std::result::Result<Self, String> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "best" => Ok(Self::Best),
+            "worst" => Ok(Self::Worst),
+            other => other
+                .strip_suffix('p')
+                .unwrap_or(other)
+                .parse()
+                .ok()
+                .filter(|&height| height > 0)
+                .map(Self::MaxHeight)
+                .ok_or_else(|| format!("`{text}` is not a quality (try best, worst, or 720)")),
+        }
+    }
+}
+
+/// Options for HLS and DASH streams.
+#[derive(Debug, Clone, Default)]
+pub struct StreamOptions {
+    pub quality: Quality,
+    /// Stop recording a live stream after this long.
+    pub live_limit: Option<std::time::Duration>,
+}
+
 /// Queue order: higher priorities start first, ties keep insertion order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Priority {
@@ -54,6 +92,7 @@ pub struct DownloadRequest {
     pub(crate) checksum: Option<Checksum>,
     pub(crate) conflict: ConflictPolicy,
     pub(crate) priority: Priority,
+    pub(crate) stream: StreamOptions,
 }
 
 impl DownloadRequest {
@@ -68,6 +107,7 @@ impl DownloadRequest {
             checksum: None,
             conflict: ConflictPolicy::default(),
             priority: Priority::default(),
+            stream: StreamOptions::default(),
         })
     }
 
@@ -146,6 +186,18 @@ impl DownloadRequest {
         self
     }
 
+    /// Variant to pick from streams that offer several.
+    pub fn quality(mut self, quality: Quality) -> Self {
+        self.stream.quality = quality;
+        self
+    }
+
+    /// Stop recording a live stream after `limit`.
+    pub fn live_limit(mut self, limit: Option<std::time::Duration>) -> Self {
+        self.stream.live_limit = limit;
+        self
+    }
+
     pub fn url(&self) -> &Url {
         &self.sources[0]
     }
@@ -171,6 +223,15 @@ fn is_sensitive(name: &HeaderName) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn qualities_parse_from_text() {
+        assert_eq!("best".parse(), Ok(Quality::Best));
+        assert_eq!("Worst".parse(), Ok(Quality::Worst));
+        assert_eq!("720p".parse(), Ok(Quality::MaxHeight(720)));
+        assert!("0".parse::<Quality>().is_err());
+        assert!("huge".parse::<Quality>().is_err());
+    }
 
     #[test]
     fn accepts_only_http_and_https() {

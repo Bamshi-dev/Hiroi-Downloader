@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use hiroi_engine::{Checksum, DownloadRequest, EngineConfig};
-use hiroi_proto::{Conflict as ProtoConflict, NewJob, Priority};
+use hiroi_engine::{Checksum, DownloadRequest, EngineConfig, Quality};
+use hiroi_proto::{Conflict as ProtoConflict, NewJob, Priority, Quality as ProtoQuality};
 
 use crate::args::{Conflict, EngineArgs, RequestArgs, TargetArgs};
 
@@ -64,7 +64,9 @@ pub fn download_request(
         .output_dir(dir)
         .connections(usize::from(target.connections))
         .speed_limit(target.limit)
-        .on_conflict(target.on_conflict.into());
+        .on_conflict(target.on_conflict.into())
+        .quality(target.quality)
+        .live_limit(target.live_limit);
     if let Some(name) = &target.output {
         request = request.file_name(name);
     }
@@ -96,6 +98,12 @@ pub fn new_job(url: &str, target: &TargetArgs, args: &RequestArgs) -> Result<New
         }),
         priority: Some(Priority::Normal),
         headers: headers(args)?,
+        quality: Some(match target.quality {
+            Quality::Best => ProtoQuality::Best,
+            Quality::Worst => ProtoQuality::Worst,
+            Quality::MaxHeight(height) => ProtoQuality::MaxHeight(height),
+        }),
+        live_limit_secs: target.live_limit.map(|limit| limit.as_secs().max(1)),
         ..NewJob::default()
     })
 }

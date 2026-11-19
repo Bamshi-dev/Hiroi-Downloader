@@ -138,6 +138,20 @@ pub struct NewJob {
     pub run_after: Option<Vec<String>>,
     /// Open the folder in the file manager when the job completes.
     pub open_folder: bool,
+    /// Which variant of a stream to fetch; the best when absent.
+    pub quality: Option<Quality>,
+    /// Stop recording a live stream after this many seconds.
+    pub live_limit_secs: Option<u64>,
+}
+
+/// Which variant of a stream to download, when it offers several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Quality {
+    Best,
+    Worst,
+    /// The best variant no taller than this many pixels.
+    MaxHeight(u32),
 }
 
 /// Files whose extension matches go into `folder` (relative to the

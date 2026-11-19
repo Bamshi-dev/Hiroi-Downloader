@@ -25,9 +25,52 @@ pub fn parse_rate(value: &str) -> Result<u64, String> {
     Ok((number * multiplier as f64).round() as u64)
 }
 
+/// Parses durations like `90`, `90s`, `45m`, `2h`, or `1h30m`.
+pub fn parse_duration(value: &str) -> Result<std::time::Duration, String> {
+    let invalid = || format!("`{value}` is not a duration (try 90s, 45m, or 1h30m)");
+    let trimmed = value.trim();
+    // A bare number is seconds.
+    let trimmed = if trimmed.ends_with(|c: char| c.is_ascii_digit()) {
+        format!("{trimmed}s")
+    } else {
+        trimmed.to_string()
+    };
+    let mut seconds = 0u64;
+    let mut number = String::new();
+    for c in trimmed.chars() {
+        if c.is_ascii_digit() {
+            number.push(c);
+            continue;
+        }
+        let unit = match c.to_ascii_lowercase() {
+            'h' => 3600,
+            'm' => 60,
+            's' => 1,
+            _ => return Err(invalid()),
+        };
+        let amount: u64 = number.parse().map_err(|_| invalid())?;
+        seconds = seconds.saturating_add(amount.saturating_mul(unit));
+        number.clear();
+    }
+    if seconds == 0 {
+        return Err(invalid());
+    }
+    Ok(std::time::Duration::from_secs(seconds))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_durations() {
+        assert_eq!(parse_duration("90").unwrap().as_secs(), 90);
+        assert_eq!(parse_duration("45m").unwrap().as_secs(), 2700);
+        assert_eq!(parse_duration("1h30m").unwrap().as_secs(), 5400);
+        assert!(parse_duration("0s").is_err());
+        assert!(parse_duration("10x").is_err());
+        assert_eq!(parse_duration("1h30").unwrap().as_secs(), 3630);
+    }
 
     #[test]
     fn parses_common_forms() {

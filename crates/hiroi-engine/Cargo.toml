@@ -7,6 +7,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+aes.workspace = true
+cbc.workspace = true
 fastrand.workspace = true
 futures-util.workspace = true
 hex.workspace = true
@@ -14,6 +16,7 @@ httpdate.workspace = true
 md-5.workspace = true
 parking_lot.workspace = true
 percent-encoding.workspace = true
+quick-xml.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

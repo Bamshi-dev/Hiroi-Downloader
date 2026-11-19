@@ -1,11 +1,12 @@
 //! Conversions between the protocol, the store, and the engine.
 
 use std::path::Path;
+use std::time::Duration;
 
 use hiroi_engine::{
     Checksum, ConflictPolicy, DownloadRequest, DownloadSnapshot, DownloadStatus, Priority,
 };
-use hiroi_proto::{Conflict, Job, JobStatus, NewJob};
+use hiroi_proto::{Conflict, Job, JobStatus, NewJob, Quality};
 use hiroi_store::{JobOptions, StoredJob};
 
 pub fn job_options(job: &NewJob) -> JobOptions {
@@ -18,6 +19,8 @@ pub fn job_options(job: &NewJob) -> JobOptions {
         priority: job.priority,
         run_after: job.run_after.clone().filter(|argv| !argv.is_empty()),
         open_folder: job.open_folder,
+        quality: job.quality,
+        live_limit_secs: job.live_limit_secs.filter(|&secs| secs > 0),
     }
 }
 
@@ -47,8 +50,18 @@ pub fn request(
     request = request
         .speed_limit(options.speed_limit)
         .on_conflict(conflict(options.on_conflict))
-        .priority(priority(options.priority));
+        .priority(priority(options.priority))
+        .quality(quality(options.quality))
+        .live_limit(options.live_limit_secs.map(Duration::from_secs));
     Ok(request)
+}
+
+fn quality(quality: Option<Quality>) -> hiroi_engine::Quality {
+    match quality {
+        None | Some(Quality::Best) => hiroi_engine::Quality::Best,
+        Some(Quality::Worst) => hiroi_engine::Quality::Worst,
+        Some(Quality::MaxHeight(height)) => hiroi_engine::Quality::MaxHeight(height),
+    }
 }
 
 /// Checks a new job before it is stored, so bad input is rejected
