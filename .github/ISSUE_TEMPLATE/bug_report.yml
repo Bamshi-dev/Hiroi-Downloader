@@ -1,0 +1,143 @@
+name: Bug report
+description: Something does not work as described.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report this. One problem per report, please.
+        A security problem goes through the private report instead (see SECURITY.md), not here.
+
+        Remove secrets before you paste anything: cookies, passwords, tokens, and private links.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where the problem shows.
+      options:
+        - Downloads (hiroi get, the engine)
+        - Background service (hiroi add, list, queues, schedules)
+        - Browser extension
+        - Page grabbing (hiroi grab)
+        - Streams and video sites (HLS, DASH, yt-dlp)
+        - FTP, SFTP, or BitTorrent
+        - Network and privacy settings
+        - Settings and search
+        - Documentation
+        - Something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        The operating system and its version, and anything else that could matter:
+        the browser and its version for the extension, a proxy or VPN, the file system.
+      placeholder: |
+        Fedora 41, x86_64
+        Firefox 133
+        Through a SOCKS5 proxy
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: The output of `hiroi --version`, or the git revision you built (`git rev-parse --short HEAD`).
+      placeholder: hiroi 0.1.0 (or a1b2c3d)
+    validations:
+      required: true
+
+  - type: input
+    id: devices
+    attributes:
+      label: Devices
+      description: The machines or devices this happens on, if it matters (for example a NAS or a second computer).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What the problem is, in a few sentences.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps, starting from a fresh state, with the commands you ran.
+      placeholder: |
+        1. hiroi daemon &
+        2. hiroi add https://example.com/file.iso
+        3. hiroi pause 1
+        4. hiroi resume 1
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual results
+      description: What happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected results
+      description: What should have happened instead.
+    validations:
+      required: true
+
+  - type: input
+    id: frequency
+    attributes:
+      label: Frequency
+      description: How often it happened, as failures out of attempts, for example 3/3 or 1/10.
+      placeholder: 3/3
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Additional information
+      description: |
+        The output with `-vv` (for example `hiroi -vv get URL`), screenshots, or anything else that helps.
+        The output is formatted as code on its own.
+      render: shell
+
+  - type: input
+    id: related
+    attributes:
+      label: Related issues
+      description: Issues or pull requests this belongs to, if any, for example #12.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open and closed issues, and this is not among them.
+          required: true
+        - label: I removed cookies, passwords, tokens, and private links from everything above.
+          required: true

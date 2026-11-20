@@ -1,0 +1,64 @@
+name: Feature request
+description: An idea for something Hiroi does not do yet.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. Hiroi is a download manager first, and it stays light and polite
+        to servers; ideas that fit that are the easiest to take on.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Downloads (hiroi get, the engine)
+        - Background service (hiroi add, list, queues, schedules)
+        - Browser extension
+        - Page grabbing (hiroi grab)
+        - Streams and video sites (HLS, DASH, yt-dlp)
+        - FTP, SFTP, or BitTorrent
+        - Network and privacy settings
+        - Settings and search
+        - Documentation
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: What you would like
+      description: "How it could work from your side: the command, the menu item, or the setting."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways around the problem you have tried or thought of, and other programs that do this.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional information
+      description: Anything else, such as links or screenshots.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send it
+      options:
+        - label: I searched the open and closed issues, and this is not among them.
+          required: true
