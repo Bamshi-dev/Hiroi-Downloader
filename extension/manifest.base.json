@@ -3,7 +3,25 @@
   "name": "Hiroi Downloader",
   "version": "0.1.0",
   "description": "Send downloads, and everything a page offers, to Hiroi Downloader.",
-  "permissions": ["contextMenus", "cookies", "downloads", "nativeMessaging", "scripting", "storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
-  "action": { "default_title": "Hiroi Downloader", "default_popup": "popup.html" }
+  "permissions": [
+    "contextMenus",
+    "cookies",
+    "downloads",
+    "nativeMessaging",
+    "scripting",
+    "storage",
+    "tabs",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_title": "Hiroi Downloader",
+    "default_popup": "popup.html"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  }
 }

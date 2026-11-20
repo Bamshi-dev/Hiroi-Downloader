@@ -3,16 +3,33 @@
 <head>
   <meta charset="utf-8">
   <style>
-    body { font: 13px system-ui, sans-serif; width: 16rem; margin: 0.75rem; }
+    body { font: 13px system-ui, sans-serif; width: 20rem; margin: 0.75rem; }
     p { margin: 0 0 0.75rem; }
-    button { width: 100%; padding: 0.4rem; }
+    h2 { font-size: 13px; margin: 0.75rem 0 0.25rem; }
+    button { padding: 0.35rem; }
+    .wide { width: 100%; margin-bottom: 0.4rem; }
     .error { color: #a12; }
+    ul { list-style: none; padding: 0; margin: 0 0 0.5rem; max-height: 14rem; overflow-y: auto; }
+    li { display: flex; gap: 0.5rem; align-items: center; padding: 0.2rem 0; border-bottom: 1px solid #eee; }
+    li span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    li small { color: #666; }
+    a { color: inherit; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1e1e1e; color: #ddd; }
+      li { border-color: #333; }
+      li small { color: #999; }
+    }
   </style>
 </head>
 <body>
   <p id="status">Checking Hiroi…</p>
+  <h2>Media on this page</h2>
+  <ul id="media"></ul>
+  <p id="none">Nothing found yet; play the video, or let Hiroi look at the page.</p>
+  <button id="video" class="wide">Download the video on this page</button>
+  <button id="grab" class="wide">Choose from everything on this page…</button>
   <p><label><input type="checkbox" id="capture"> Send browser downloads to Hiroi</label></p>
-  <button id="grab">Grab this page</button>
+  <p><a href="#" id="options">Options</a></p>
   <script src="common.js"></script>
   <script src="popup.js"></script>
 </body>

@@ -13,7 +13,8 @@ for target in firefox chrome; do
 import json, sys
 manifest = json.load(open(sys.argv[1]))
 if sys.argv[2] == "firefox":
-    manifest["background"] = {"scripts": ["common.js", "background.js"]}
+    manifest["background"] = {"scripts": ["common.js", "detect.js", "background.js"]}
+    # Must match FIREFOX_EXTENSION_ID in crates/hiroi-cli/src/commands/browser.rs.
     manifest["browser_specific_settings"] = {"gecko": {"id": "{70e8535c-40cf-424f-907d-a682e59d03b4}", "strict_min_version": "121.0"}}
 else:
     manifest["background"] = {"service_worker": "background.js"}

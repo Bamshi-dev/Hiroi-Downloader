@@ -8,7 +8,8 @@ use hiroi_daemon::native::{self, Browser, HOST_NAME};
 
 use crate::args::BrowserCommand;
 
-/// The ID of the Firefox extension, set in its manifest.
+/// The ID of the Firefox extension, set in its manifest by
+/// `extension/build.sh`.
 pub const FIREFOX_EXTENSION_ID: &str = "{70e8535c-40cf-424f-907d-a682e59d03b4}";
 
 /// Where Firefox looks for host manifests, relative to the home folder.

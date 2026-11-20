@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hiroi Downloader: options</title>
+  <style>
+    body { font: 14px system-ui, sans-serif; max-width: 44rem; margin: 1.5rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.2rem; }
+    #search { width: 100%; padding: 0.4rem; margin-bottom: 1rem; box-sizing: border-box; }
+    .option { padding: 0.6rem 0; border-bottom: 1px solid #eee; }
+    .option label { font-weight: 600; display: block; margin-bottom: 0.2rem; }
+    .option input[type="text"] { width: 100%; box-sizing: border-box; padding: 0.3rem; }
+    .option input[type="number"] { width: 6rem; padding: 0.3rem; }
+    .help { color: #666; margin: 0.25rem 0 0; }
+    .app { color: #666; margin-top: 1.5rem; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1e1e1e; color: #ddd; }
+      .option { border-color: #333; }
+      .help, .app { color: #999; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Hiroi Downloader</h1>
+  <input type="search" id="search" placeholder="Search options" autofocus>
+  <div id="options"></div>
+  <p id="nothing" hidden>No option matches.</p>
+  <p class="app">These are the browser extension's options. Hiroi's own settings (proxy, VPN interface,
+    IP filter, smart folders, ...) are listed by <code>hiroi settings list</code> and found with
+    <code>hiroi search</code>.</p>
+  <script src="common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

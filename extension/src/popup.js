@@ -1,18 +1,53 @@
 "use strict";
 
-(async () => {
-  const status = document.getElementById("status");
-  const answer = await ping();
-  status.textContent = answer.ok ? `Connected to Hiroi ${answer.version}` : `Hiroi is not reachable: ${answer.error}`;
-  status.className = answer.ok ? "" : "error";
+const $ = (id) => document.getElementById(id);
 
-  const capture = document.getElementById("capture");
-  capture.checked = (await api.storage.local.get({ capture: false })).capture;
+(async () => {
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+
+  const answer = await ping();
+  $("status").textContent = answer.ok ? `Connected to Hiroi ${answer.version}` : `Hiroi is not reachable: ${answer.error}`;
+  $("status").className = answer.ok ? "" : "error";
+
+  const media = (await api.runtime.sendMessage({ type: "media", tabId: tab.id })) || [];
+  $("none").hidden = media.length > 0;
+  for (const entry of media) {
+    const row = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = entry.name;
+    name.title = entry.url;
+    const info = document.createElement("small");
+    info.textContent = [entry.kind, humanSize(entry.size)].filter(Boolean).join(", ");
+    const button = document.createElement("button");
+    button.textContent = "Download";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      const sent = await sendToHiroi({ url: entry.url, referrer: tab.url });
+      button.textContent = sent.ok ? `Job ${sent.job}` : "Failed";
+      button.title = sent.ok ? "" : sent.error;
+    });
+    row.append(name, info, button);
+    $("media").append(row);
+  }
+
+  $("video").addEventListener("click", async () => {
+    $("video").disabled = true;
+    const sent = await sendToHiroi({ url: tab.url, extract: true });
+    $("video").textContent = sent.ok ? `Added as job ${sent.job}` : `Hiroi: ${sent.error}`;
+  });
+
+  $("grab").addEventListener("click", async () => {
+    await api.runtime.sendMessage({ type: "grab", tabId: tab.id });
+    window.close();
+  });
+
+  const capture = $("capture");
+  capture.checked = (await getOptions()).capture;
   capture.addEventListener("change", () => api.storage.local.set({ capture: capture.checked }));
 
-  document.getElementById("grab").addEventListener("click", async () => {
-    const [tab] = await api.tabs.query({ active: true, currentWindow: true });
-    await api.runtime.sendMessage({ type: "grab", tabId: tab.id });
+  $("options").addEventListener("click", (event) => {
+    event.preventDefault();
+    api.runtime.openOptionsPage();
     window.close();
   });
 })();
