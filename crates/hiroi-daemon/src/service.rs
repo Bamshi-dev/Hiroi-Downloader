@@ -487,6 +487,10 @@ impl Service {
                 Err(error) => added.errors.push(format!("{url}: {error}")),
             }
         }
+        // No job joined it, so there is no group to speak of.
+        if added.jobs.is_empty() {
+            added.group = None;
+        }
         added
     }
 

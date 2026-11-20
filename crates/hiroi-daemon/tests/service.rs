@@ -528,6 +528,24 @@ async fn batches_get_a_group_and_series_get_a_folder() {
     assert_eq!(groups.len(), 1);
     assert_eq!((groups[0].jobs, groups[0].completed), (3, 3));
     assert_eq!(groups[0].total_size, Some(3 * 4096));
+    let again = add_batch(
+        &mut client,
+        hiroi_proto::NewBatch {
+            jobs: names
+                .iter()
+                .map(|name| NewJob {
+                    url: server.url(&name.replace(' ', "_")),
+                    file_name: Some(name.to_string()),
+                    ..NewJob::default()
+                })
+                .collect(),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(again.jobs.is_empty());
+    assert_eq!(again.errors.len(), 3);
+    assert_eq!(again.group, None, "a batch of duplicates forms no group");
     assert!(
         client
             .call(Request::PauseGroup {
