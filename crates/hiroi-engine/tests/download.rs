@@ -107,7 +107,7 @@ async fn pause_and_resume_continue_where_they_stopped() {
     assert!(dir.path().join("big.bin.hiroi-state").exists());
 
     server.set_behavior(Behavior::default());
-    let served_before = server.bytes_served();
+    let requests_before = server.received().len();
     let second = engine();
     let snapshot = run(
         &second,
@@ -117,16 +117,48 @@ async fn pause_and_resume_continue_where_they_stopped() {
 
     assert_eq!(snapshot.status, DownloadStatus::Completed);
     assert_eq!(std::fs::read(dir.path().join("big.bin")).unwrap(), data);
-    // "Served" counts bytes handed to the kernel. A connection that stops
-    // early leaves some of them unread in socket buffers, hence the slack.
-    // A download that started over would need at least `size` bytes.
-    let served_again = server.bytes_served() - served_before;
-    let slack = 768 * KIB as u64;
+    // Count what the second run asked for, from its Range headers. That
+    // does not depend on how much was sitting in socket buffers when the
+    // first run stopped, as the bytes a server sent would.
+    let asked = requested_bytes(&server.received()[requests_before..]);
     assert!(paused_at >= MIB as u64);
-    assert!(
-        served_again < size as u64 - paused_at + slack,
-        "resume fetched {served_again} bytes although {paused_at} were already saved"
+    assert_eq!(
+        asked,
+        size as u64 - paused_at,
+        "resume asked for {asked} bytes although {paused_at} of {size} were saved"
     );
+}
+
+/// Bytes covered by the Range headers of `requests`, overlaps counted
+/// once. The probe's single byte is left out.
+fn requested_bytes(requests: &[hiroi_testserver::Received]) -> u64 {
+    let mut ranges: Vec<(u64, u64)> = requests
+        .iter()
+        .filter_map(|r| {
+            r.headers
+                .get("range")?
+                .to_str()
+                .ok()?
+                .strip_prefix("bytes=")
+                .map(str::to_string)
+        })
+        .filter_map(|range| {
+            let (start, end) = range.split_once('-')?;
+            Some((start.parse().ok()?, end.parse::<u64>().ok()? + 1))
+        })
+        .filter(|&(start, end)| !(start == 0 && end == 1))
+        .collect();
+    ranges.sort_unstable();
+    let mut total = 0;
+    let mut reached = 0;
+    for (start, end) in ranges {
+        let start = start.max(reached);
+        if end > start {
+            total += end - start;
+            reached = end;
+        }
+    }
+    total
 }
 
 #[tokio::test]
