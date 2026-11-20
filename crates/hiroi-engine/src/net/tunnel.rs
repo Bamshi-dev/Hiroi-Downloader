@@ -89,31 +89,24 @@ impl Route {
                     login,
                     remote_dns,
                 } => {
-                    let target = if *remote_dns {
-                        TargetAddr::Domain(host.into(), port)
+                    let targets = if *remote_dns {
+                        vec![TargetAddr::Domain(host.into(), port)]
                     } else {
-                        // socks5:// means the name is looked up here.
+                        // socks5:// means the name is looked up here. A
+                        // name can have several addresses (`localhost`
+                        // is often ::1 and 127.0.0.1), and the server
+                        // may listen on only one, so each is tried.
                         let found = guard.lookup(host, port).await?;
-                        TargetAddr::Ip(found[0])
+                        found.into_iter().map(TargetAddr::Ip).collect()
                     };
-                    // The proxy is the user's choice: bound like any
-                    // connection, but not filtered.
-                    let at = tokio::net::lookup_host(proxy.as_str())
-                        .await?
-                        .collect::<Vec<_>>();
-                    let socket = guard.connect(&at, timeout).await?;
-                    let stream = match login {
-                        Some((user, password)) => {
-                            Socks5Stream::connect_with_password_and_socket(
-                                socket, target, user, password,
-                            )
-                            .await
+                    let mut last = None;
+                    for target in targets {
+                        match socks5(guard, proxy, login.as_ref(), target, timeout).await {
+                            Ok(stream) => return Ok(stream),
+                            Err(error) => last = Some(error),
                         }
-                        None => Socks5Stream::connect_with_socket(socket, target).await,
-                    };
-                    stream
-                        .map(Socks5Stream::into_inner)
-                        .map_err(|e| std::io::Error::other(format!("SOCKS5 proxy: {e}")))
+                    }
+                    Err(last.unwrap_or_else(|| std::io::Error::other("the server has no address")))
                 }
             }
         };
@@ -129,6 +122,28 @@ impl Route {
             Err(_) => Err(FetchError::Connection("connecting took too long".into())),
         }
     }
+}
+
+/// One connection to `target` through the proxy. The proxy is the
+/// user's choice: bound like any connection, but not filtered.
+async fn socks5(
+    guard: &Guard,
+    proxy: &str,
+    login: Option<&(String, String)>,
+    target: TargetAddr<'_>,
+    timeout: Duration,
+) -> std::io::Result<TcpStream> {
+    let at = tokio::net::lookup_host(proxy).await?.collect::<Vec<_>>();
+    let socket = guard.connect(&at, timeout).await?;
+    let stream = match login {
+        Some((user, password)) => {
+            Socks5Stream::connect_with_password_and_socket(socket, target, user, password).await
+        }
+        None => Socks5Stream::connect_with_socket(socket, target).await,
+    };
+    stream
+        .map(Socks5Stream::into_inner)
+        .map_err(|e| std::io::Error::other(format!("SOCKS5 proxy: {e}")))
 }
 
 #[cfg(test)]
