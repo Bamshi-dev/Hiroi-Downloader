@@ -9,7 +9,7 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::header::{CONTENT_RANGE, HeaderMap, IF_RANGE, RANGE};
-use reqwest::{Response, StatusCode, Url};
+use reqwest::{Client, Response, StatusCode, Url};
 
 use crate::constants::DEFAULT_THROTTLE_PAUSE;
 use crate::limit::HostGate;
@@ -35,8 +35,11 @@ pub(crate) enum Want {
     Whole,
 }
 
+// `shared` is only read by the optional protocols.
+#[cfg_attr(not(any(feature = "ftp", feature = "sftp")), allow(unused_variables))]
 pub(crate) async fn probe(
     shared: &EngineShared,
+    client: &Client,
     url: &Url,
     headers: &HeaderMap,
 ) -> FetchResult<RemoteFile> {
@@ -45,14 +48,16 @@ pub(crate) async fn probe(
         "ftp" | "ftps" => super::ftp::probe(shared, url).await,
         #[cfg(feature = "sftp")]
         "sftp" => super::sftp::probe(shared, url).await,
-        _ => probe::probe(&shared.client, url, headers).await,
+        _ => probe::probe(client, url, headers).await,
     }
 }
 
 /// Opens what `want` asks for. The caller holds the connection and host
 /// permits; `gate` is told when the server asks us to slow down.
+#[cfg_attr(not(any(feature = "ftp", feature = "sftp")), allow(unused_variables))]
 pub(crate) async fn open(
     shared: &EngineShared,
+    client: &Client,
     source: &Source,
     headers: &HeaderMap,
     gate: &HostGate,
@@ -63,18 +68,18 @@ pub(crate) async fn open(
         "ftp" | "ftps" => super::ftp::open(shared, source, gate, want).await,
         #[cfg(feature = "sftp")]
         "sftp" => super::sftp::open(shared, source, want).await,
-        _ => open_http(shared, source, headers, gate, want).await,
+        _ => open_http(client, source, headers, gate, want).await,
     }
 }
 
 async fn open_http(
-    shared: &EngineShared,
+    client: &Client,
     source: &Source,
     headers: &HeaderMap,
     gate: &HostGate,
     want: Want,
 ) -> FetchResult<Body> {
-    let mut request = shared.client.get(source.url()).headers(headers.clone());
+    let mut request = client.get(source.url()).headers(headers.clone());
     if let Want::Range { start, end, .. } = want {
         request = request.header(RANGE, format!("bytes={start}-{}", end - 1));
         // If the file changed, the server answers 200 instead of mixing

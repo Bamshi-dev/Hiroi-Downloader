@@ -19,6 +19,7 @@ pub fn engine_config(engine: &EngineArgs) -> EngineConfig {
         require_proxy: engine.require_proxy,
         strip_tracking: engine.strip_tracking,
         no_referer: engine.no_referer,
+        cookie_jar: !engine.no_cookie_jar,
         ..EngineConfig::default()
     }
 }

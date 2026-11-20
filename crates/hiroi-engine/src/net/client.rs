@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use reqwest::header::{ACCEPT, ACCEPT_ENCODING, HeaderMap, HeaderValue};
 use reqwest::redirect::Policy;
 use reqwest::{Client, Proxy, Url};
@@ -5,21 +7,38 @@ use reqwest::{Client, Proxy, Url};
 use crate::config::EngineConfig;
 use crate::constants::MAX_REDIRECTS;
 use crate::error::{EngineError, Result};
+use crate::net::cookies::DownloadCookies;
+use crate::net::tls::{self, Purpose};
 
+/// The engine's shared client, for requests that belong to no download.
 pub(crate) fn build_client(config: &EngineConfig) -> Result<Client> {
+    build_client_with(config, download_policy(config), None)
+}
+
+/// A client for one download, with its own cookies. Connections are not
+/// shared with other downloads, which also keeps one site's connection
+/// from carrying another's cookies.
+pub(crate) fn download_client(config: &EngineConfig, cookies: DownloadCookies) -> Result<Client> {
+    build_client_with(config, download_policy(config), Some(Arc::new(cookies)))
+}
+
+fn download_policy(config: &EngineConfig) -> Policy {
     let allow_insecure = config.allow_insecure_redirects;
-    let policy = Policy::custom(move |attempt| {
+    Policy::custom(move |attempt| {
         match check_redirect(attempt.previous(), attempt.url(), allow_insecure) {
             Ok(()) => attempt.follow(),
             Err(reason) => attempt.error(reason),
         }
-    });
-    build_client_with(config, policy)
+    })
 }
 
 /// The engine's client with another redirect policy, for the exposure
 /// report, which looks at every hop itself.
-pub(crate) fn build_client_with(config: &EngineConfig, policy: Policy) -> Result<Client> {
+pub(crate) fn build_client_with(
+    config: &EngineConfig,
+    policy: Policy,
+    cookies: Option<Arc<DownloadCookies>>,
+) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
     // Byte offsets only line up with the file on the server when the
@@ -33,7 +52,11 @@ pub(crate) fn build_client_with(config: &EngineConfig, policy: Policy) -> Result
         .read_timeout(config.read_timeout)
         .pool_max_idle_per_host(config.max_connections_per_host)
         .tcp_nodelay(true)
+        .tls_backend_preconfigured(tls::config(Purpose::Http, false)?.as_ref().clone())
         .redirect(policy);
+    if let Some(cookies) = cookies {
+        builder = builder.cookie_provider(cookies);
+    }
 
     if let Some(proxy) = &config.proxy {
         let proxy = Proxy::all(proxy)

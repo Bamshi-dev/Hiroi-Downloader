@@ -196,7 +196,11 @@ impl Engine {
     pub async fn inspect(&self, request: &DownloadRequest) -> RemoteInfo {
         let cancel = CancellationToken::new();
         let shared = &self.inner.shared;
-        let results = inspect::probe_all(shared, request, &cancel, &|_, _| {}).await;
+        // The client was already built once in Engine::new with these
+        // settings, so building it again cannot fail in practice.
+        let (scoped, client) = task::own_client(&shared.config, request)
+            .unwrap_or_else(|_| (request.clone(), shared.client.clone()));
+        let results = inspect::probe_all(shared, &client, &scoped, &cancel, &|_, _| {}).await;
         inspect::describe(request, &results)
     }
 
@@ -277,6 +281,8 @@ impl EngineInner {
                 entry.set_status(DownloadStatus::Connecting);
                 snapshots.push(snapshot(id, entry));
                 started.push(TaskContext {
+                    // Replaced by the download's own client when it starts.
+                    client: self.shared.client.clone(),
                     id,
                     request: Arc::clone(&entry.request),
                     shared: Arc::clone(&self.shared),
@@ -295,7 +301,10 @@ impl EngineInner {
             let engine = Arc::clone(self);
             let id = ctx.id;
             tokio::spawn(async move {
-                let result = task::run(Arc::new(ctx)).await;
+                let result = match ctx.with_own_client() {
+                    Ok(ctx) => task::run(Arc::new(ctx)).await,
+                    Err(error) => Err(error),
+                };
                 engine.finish(id, result);
             });
         }

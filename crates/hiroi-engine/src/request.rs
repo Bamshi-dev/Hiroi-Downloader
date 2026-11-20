@@ -101,6 +101,10 @@ pub struct DownloadRequest {
     /// Metalink, the tracks of a video page), so they are not followed
     /// again.
     pub(crate) derived: bool,
+    /// The user's Cookie header, taken out of `headers` when the download
+    /// starts; the client sends it to its site only. Kept for yt-dlp,
+    /// which reads the page itself.
+    pub(crate) own_cookies: Option<String>,
 }
 
 impl DownloadRequest {
@@ -117,6 +121,7 @@ impl DownloadRequest {
             priority: Priority::default(),
             stream: StreamOptions::default(),
             derived: false,
+            own_cookies: None,
         })
     }
 

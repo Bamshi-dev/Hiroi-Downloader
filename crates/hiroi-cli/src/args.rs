@@ -530,6 +530,11 @@ pub struct EngineArgs {
     /// Never send a Referer, not even one the browser handed over.
     #[arg(long)]
     pub no_referer: bool,
+
+    /// Ignore cookies servers set during a download. Some download pages
+    /// set a session cookie first and fail without it.
+    #[arg(long)]
+    pub no_cookie_jar: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

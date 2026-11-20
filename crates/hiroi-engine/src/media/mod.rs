@@ -495,7 +495,6 @@ async fn fetch_small_once(
     let gate = ctx.shared.hosts.gate(&crate::net::host_key(url));
     let _host = or_cancel(&ctx.cancel, gate.acquire()).await?;
     let request = ctx
-        .shared
         .client
         .get(url.clone())
         .headers(ctx.request.headers.clone());

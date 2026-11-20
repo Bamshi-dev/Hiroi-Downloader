@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::Url;
+use reqwest::{Client, Url};
 use tokio_util::sync::CancellationToken;
 
 use crate::constants::DEFAULT_THROTTLE_PAUSE;
@@ -56,6 +56,7 @@ pub(crate) type RetryHook<'a> = &'a (dyn Fn(&str, Duration) + Sync);
 /// Probes every source of `request` at the same time.
 pub(crate) async fn probe_all(
     shared: &EngineShared,
+    client: &Client,
     request: &DownloadRequest,
     cancel: &CancellationToken,
     on_retry: RetryHook<'_>,
@@ -63,7 +64,7 @@ pub(crate) async fn probe_all(
     let probes = request
         .sources
         .iter()
-        .map(|url| probe_with_retry(shared, request, url, cancel, on_retry));
+        .map(|url| probe_with_retry(shared, client, request, url, cancel, on_retry));
     futures_util::future::join_all(probes).await
 }
 
@@ -167,6 +168,7 @@ fn disagreement(base: &RemoteFile, mirror: &RemoteFile) -> Option<&'static str> 
 
 async fn probe_with_retry(
     shared: &EngineShared,
+    client: &Client,
     request: &DownloadRequest,
     url: &Url,
     cancel: &CancellationToken,
@@ -177,7 +179,7 @@ async fn probe_with_retry(
     loop {
         let result = {
             let _host = or_cancel(cancel, gate.acquire()).await?;
-            let probe = protocol::probe(shared, url, &request.headers);
+            let probe = protocol::probe(shared, client, url, &request.headers);
             or_cancel(cancel, probe).await?
         };
         let error = match result {

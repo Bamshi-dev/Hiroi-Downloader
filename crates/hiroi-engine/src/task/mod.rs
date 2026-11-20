@@ -22,6 +22,8 @@ use crate::inspect;
 use crate::limit::{HostLimiter, RateLimiter};
 use crate::media;
 use crate::metalink;
+use crate::net::client;
+use crate::net::cookies::DownloadCookies;
 use crate::net::probe::RemoteFile;
 use crate::net::source::SourcePool;
 use crate::request::{ConflictPolicy, DownloadRequest};
@@ -52,6 +54,8 @@ pub(crate) trait TaskObserver: Send + Sync {
 }
 
 pub(crate) struct TaskContext {
+    /// This download's HTTP client, with its own cookies.
+    pub client: Client,
     pub id: DownloadId,
     pub request: Arc<DownloadRequest>,
     pub shared: Arc<EngineShared>,
@@ -62,12 +66,24 @@ pub(crate) struct TaskContext {
 }
 
 impl TaskContext {
+    /// Gives the task a client of its own, with the request's cookies
+    /// scoped to its site and, when enabled, a jar for cookies servers
+    /// set. The Cookie header leaves the request: the client adds it to
+    /// the requests that may carry it.
+    pub fn with_own_client(mut self) -> Result<Self> {
+        let (request, client) = own_client(&self.shared.config, &self.request)?;
+        self.client = client;
+        self.request = Arc::new(request);
+        Ok(self)
+    }
+
     /// The same task working on another request, such as one of the
     /// tracks an extractor found. Progress, limits, and cancellation
     /// stay shared.
     pub fn derive(&self, mut request: DownloadRequest) -> Self {
         request.derived = true;
         Self {
+            client: self.client.clone(),
             id: self.id,
             request: Arc::new(request),
             shared: Arc::clone(&self.shared),
@@ -77,6 +93,24 @@ impl TaskContext {
             observer: Arc::clone(&self.observer),
         }
     }
+}
+
+/// A client for `request`, and the request without its Cookie header,
+/// which the client now adds where it belongs.
+pub(crate) fn own_client(
+    config: &EngineConfig,
+    request: &DownloadRequest,
+) -> Result<(DownloadRequest, Client)> {
+    let mut request = request.clone();
+    let own = request
+        .headers
+        .remove(reqwest::header::COOKIE)
+        .and_then(|value| value.to_str().ok().map(str::to_string));
+    let cookies = DownloadCookies::new(request.url(), own.as_deref(), config.cookie_jar);
+    if own.is_some() {
+        request.own_cookies = own;
+    }
+    Ok((request, client::download_client(config, cookies)?))
 }
 
 impl std::fmt::Debug for TaskContext {
@@ -127,7 +161,14 @@ pub(crate) async fn run(ctx: Arc<TaskContext>) -> Result<PathBuf> {
         return crate::torrent::download(&ctx, crate::torrent::Source::Magnet(link)).await;
     }
     let on_retry = |reason: &str, delay| ctx.observer.retrying(ctx.id, reason, delay);
-    let results = inspect::probe_all(&ctx.shared, &ctx.request, &ctx.cancel, &on_retry).await;
+    let results = inspect::probe_all(
+        &ctx.shared,
+        &ctx.client,
+        &ctx.request,
+        &ctx.cancel,
+        &on_retry,
+    )
+    .await;
     let (pool, remote) = inspect::select(&ctx.request, results)?;
     if let Some(kind) = media::detect(&remote) {
         return media::download(&ctx, remote.final_url.clone(), kind).await;

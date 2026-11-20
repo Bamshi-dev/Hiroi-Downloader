@@ -20,8 +20,6 @@
 //! - Paths and credentials are checked for line breaks, which would let
 //!   a URL smuggle extra commands into the session.
 
-use std::sync::{Arc, OnceLock};
-
 use bytes::{Bytes, BytesMut};
 use futures_util::stream;
 use percent_encoding::percent_decode_str;
@@ -30,7 +28,6 @@ use suppaftp::tokio::{AsyncRustlsConnector, AsyncRustlsFtpStream, TransferStream
 use suppaftp::types::FileType;
 use suppaftp::{FtpError, Mode};
 use tokio::io::AsyncReadExt;
-use tokio_rustls::rustls::ClientConfig;
 
 use crate::constants::{DEFAULT_THROTTLE_PAUSE, WRITE_BUFFER_SIZE};
 use crate::error::EngineError;
@@ -210,22 +207,9 @@ async fn timed<F: Future>(shared: &EngineShared, future: F) -> FetchResult<F::Ou
 }
 
 fn tls() -> FetchResult<tokio_rustls::TlsConnector> {
-    static CONFIG: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
-    let config = CONFIG.get_or_init(|| {
-        use rustls_platform_verifier::BuilderVerifierExt;
-        let provider = Arc::new(tokio_rustls::rustls::crypto::aws_lc_rs::default_provider());
-        ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .and_then(|builder| builder.with_platform_verifier())
-            .map(|builder| Arc::new(builder.with_no_client_auth()))
-            .map_err(|e| e.to_string())
-    });
-    match config {
-        Ok(config) => Ok(tokio_rustls::TlsConnector::from(Arc::clone(config))),
-        Err(error) => Err(FetchError::Fatal(EngineError::Protocol(format!(
-            "TLS setup failed: {error}"
-        )))),
-    }
+    let config =
+        crate::net::tls::config(crate::net::tls::Purpose::Ftp, false).map_err(FetchError::Fatal)?;
+    Ok(tokio_rustls::TlsConnector::from(config))
 }
 
 /// The path to `RETR`, as RFC 1738 reads it: relative to the login

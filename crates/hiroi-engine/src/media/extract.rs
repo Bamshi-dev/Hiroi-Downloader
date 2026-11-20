@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::Url;
-use reqwest::header::{COOKIE, HeaderMap, HeaderName, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::Command;
@@ -168,7 +168,7 @@ pub(crate) async fn download(ctx: &Arc<TaskContext>) -> Result<PathBuf> {
         return delegate(ctx, &page, &media, &name, &config).await;
     }
     match media.tracks.as_slice() {
-        [only] => fetch(ctx, &page, only, name, ctx.request.conflict).await,
+        [only] => fetch(ctx, only, name, ctx.request.conflict).await,
         [video, audio] => {
             let named = ctx.derive(with_name(&ctx.request, name));
             let paths = plan_stream(&named, &page, &media.ext)?;
@@ -181,8 +181,8 @@ pub(crate) async fn download(ctx: &Arc<TaskContext>) -> Result<PathBuf> {
             // One after the other: the progress shows one track at a time,
             // and each gets every connection the request allows.
             let overwrite = ConflictPolicy::Overwrite;
-            let video = fetch(ctx, &page, video, track_name("video", video), overwrite).await?;
-            let audio = fetch(ctx, &page, audio, track_name("audio", audio), overwrite).await?;
+            let video = fetch(ctx, video, track_name("video", video), overwrite).await?;
+            let audio = fetch(ctx, audio, track_name("audio", audio), overwrite).await?;
             mux::combine(&video, &audio, &paths.final_path).await?;
             ctx.progress.update(|p| p.paths = Some(paths.clone()));
             Ok(paths.final_path)
@@ -195,7 +195,6 @@ pub(crate) async fn download(ctx: &Arc<TaskContext>) -> Result<PathBuf> {
 /// progress, limits, and cancellation.
 async fn fetch(
     ctx: &Arc<TaskContext>,
-    page: &Url,
     track: &Track,
     name: String,
     conflict: ConflictPolicy,
@@ -203,7 +202,7 @@ async fn fetch(
     let mut request = with_name(&ctx.request, name);
     request.sources = vec![track.url.clone()];
     request.conflict = conflict;
-    request.headers = track_headers(&ctx.request.headers, page, track)?;
+    request.headers = track_headers(track)?;
     // A checksum belongs to the file the user named, not to one track.
     request.checksum = None;
     Box::pin(task::run(Arc::new(ctx.derive(request)))).await
@@ -217,9 +216,9 @@ fn with_name(request: &DownloadRequest, name: String) -> DownloadRequest {
     request
 }
 
-/// The headers yt-dlp used for the track. The user's cookies go along
-/// only to the site they came from, never to a third-party CDN.
-fn track_headers(original: &HeaderMap, page: &Url, track: &Track) -> Result<HeaderMap> {
+/// The headers yt-dlp used for the track. The user's cookies are not
+/// among them: the download's client sends those to their site only.
+fn track_headers(track: &Track) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     for (name, value) in &track.headers {
         let name = HeaderName::try_from(name.as_str())
@@ -227,11 +226,6 @@ fn track_headers(original: &HeaderMap, page: &Url, track: &Track) -> Result<Head
         let value = HeaderValue::try_from(value.as_str())
             .map_err(|_| EngineError::InvalidHeader(name.to_string()))?;
         headers.insert(name, value);
-    }
-    if track.url.host_str() == page.host_str()
-        && let Some(cookie) = original.get(COOKIE)
-    {
-        headers.insert(COOKIE, cookie.clone());
     }
     Ok(headers)
 }
@@ -412,6 +406,13 @@ impl ConfigFile {
                 quote(&format!("{name}:{value}"))
             ));
         }
+        // yt-dlp reads the page itself, so it needs the user's cookies.
+        if let Some(cookies) = &ctx.request.own_cookies {
+            lines.push(format!(
+                "--add-header {}",
+                quote(&format!("Cookie:{cookies}"))
+            ));
+        }
         let unique = format!(
             "hiroi-yt-dlp-{}-{}.conf",
             std::process::id(),
@@ -494,30 +495,17 @@ mod tests {
     }
 
     #[test]
-    fn cookies_stay_with_their_site() {
-        let mut original = HeaderMap::new();
-        original.insert(COOKIE, HeaderValue::from_static("session=1"));
-        let page = Url::parse("https://site.example/watch").unwrap();
-        let mut track = Track {
+    fn track_headers_are_yt_dlps_own() {
+        let track = Track {
             format_id: "0".into(),
             url: Url::parse("https://cdn.example/v.mp4").unwrap(),
             protocol: "https".into(),
             ext: "mp4".into(),
-            headers: vec![("Referer".into(), page.to_string())],
+            headers: vec![("Referer".into(), "https://site.example/watch".into())],
         };
-        assert!(
-            track_headers(&original, &page, &track)
-                .unwrap()
-                .get(COOKIE)
-                .is_none()
-        );
-        track.url = Url::parse("https://site.example/v.mp4").unwrap();
-        assert!(
-            track_headers(&original, &page, &track)
-                .unwrap()
-                .get(COOKIE)
-                .is_some()
-        );
+        let headers = track_headers(&track).unwrap();
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers["referer"], "https://site.example/watch");
     }
 
     #[test]

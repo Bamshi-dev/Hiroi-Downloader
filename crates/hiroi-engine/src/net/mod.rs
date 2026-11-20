@@ -1,6 +1,7 @@
 //! Everything that talks to servers.
 
 pub(crate) mod client;
+pub(crate) mod cookies;
 #[cfg(feature = "ftp")]
 pub(crate) mod ftp;
 pub(crate) mod headers;
@@ -10,6 +11,7 @@ pub mod retry;
 #[cfg(feature = "sftp")]
 pub(crate) mod sftp;
 pub(crate) mod source;
+pub(crate) mod tls;
 
 use reqwest::Url;
 

@@ -37,6 +37,9 @@ pub struct Behavior {
     /// `slow_rate` bytes per second instead of `bytes_per_sec`.
     pub slow_requests: Vec<usize>,
     pub slow_rate: u64,
+    /// Files are refused with 403 unless the request's Cookie header
+    /// contains this, as on download pages that set a session first.
+    pub require_cookie: Option<String>,
 }
 
 impl Default for Behavior {
@@ -50,6 +53,7 @@ impl Default for Behavior {
             content_disposition: None,
             slow_requests: Vec::new(),
             slow_rate: 16 * 1024,
+            require_cookie: None,
         }
     }
 }
@@ -70,7 +74,8 @@ struct ServerState {
     throttled: AtomicUsize,
     requests: AtomicUsize,
     versions: AtomicU64,
-    redirects: Mutex<HashMap<String, String>>,
+    /// Name, target, and the cookie the redirect sets, if any.
+    redirects: Mutex<HashMap<String, (String, Option<String>)>>,
     /// Requests in the order they arrived.
     seen: Mutex<Vec<Received>>,
 }
@@ -145,7 +150,15 @@ impl TestServer {
             .redirects
             .lock()
             .unwrap()
-            .insert(name.to_string(), target.to_string());
+            .insert(name.to_string(), (target.to_string(), None));
+    }
+
+    /// Like [`Self::redirect`], with a `Set-Cookie: cookie` on the way.
+    pub fn redirect_setting_cookie(&self, name: &str, target: &str, cookie: &str) {
+        self.state.redirects.lock().unwrap().insert(
+            name.to_string(),
+            (target.to_string(), Some(cookie.to_string())),
+        );
     }
 
     /// Every request so far, oldest first.
@@ -214,14 +227,25 @@ async fn serve(
         query,
         headers: headers.clone(),
     });
-    if let Some(target) = state.redirects.lock().unwrap().get(&name) {
-        return Response::builder()
+    if let Some((target, cookie)) = state.redirects.lock().unwrap().get(&name) {
+        let mut response = Response::builder()
             .status(StatusCode::FOUND)
-            .header(header::LOCATION, target)
-            .body(Body::empty())
-            .unwrap();
+            .header(header::LOCATION, target);
+        if let Some(cookie) = cookie {
+            response = response.header(header::SET_COOKIE, cookie);
+        }
+        return response.body(Body::empty()).unwrap();
     }
     let mut behavior = state.behavior.lock().unwrap().clone();
+    if let Some(wanted) = &behavior.require_cookie {
+        let sent = headers
+            .get(header::COOKIE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        if !sent.contains(wanted.as_str()) {
+            return empty(StatusCode::FORBIDDEN);
+        }
+    }
     if behavior.slow_requests.contains(&index) {
         behavior.bytes_per_sec = Some(behavior.slow_rate);
     }

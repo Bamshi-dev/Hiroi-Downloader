@@ -40,13 +40,14 @@ percent-encoding = "2"
 quick-xml = "0.42"
 # HTTP/2 is left out on purpose: it multiplexes every range request over one
 # TCP connection, which defeats the point of parallel connections.
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "socks"] }
+reqwest = { version = "0.13", default-features = false, features = ["cookies", "rustls", "stream", "socks"] }
 # Bundled: no system SQLite needed, same version everywhere.
 rusqlite = { version = "0.43", features = ["bundled"] }
 # Only with the `sftp` feature.
 russh = { version = "0.65", default-features = false, features = ["aws-lc-rs"] }
 russh-sftp = "3"
 rustix = { version = "1", features = ["fs", "process"] }
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 rustls-platform-verifier = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

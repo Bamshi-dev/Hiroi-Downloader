@@ -12,6 +12,7 @@
 //! can only list who is in a position to.
 
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header::{
@@ -25,6 +26,7 @@ use crate::config::EngineConfig;
 use crate::constants::MAX_REDIRECTS;
 use crate::error::{EngineError, Result};
 use crate::net::client;
+use crate::net::cookies::DownloadCookies;
 use crate::net::display_url;
 use crate::privacy::{self, ProxyKind};
 use crate::request::DownloadRequest;
@@ -144,9 +146,16 @@ pub(crate) async fn report(
     // Trace what a download would send, settings applied.
     let mut request = request.clone();
     privacy::apply(config, &mut request);
+    // Cookies travel as they would in a download: the user's own to
+    // their site only, and those servers set kept for the trace.
+    let own = request
+        .headers
+        .remove(COOKIE)
+        .and_then(|value| value.to_str().ok().map(str::to_string));
+    let cookies = DownloadCookies::new(request.url(), own.as_deref(), config.cookie_jar);
     let request = &request;
     // A client that stops at every redirect, so each hop can be seen.
-    let tracer = client::build_client_with(config, Policy::none())?;
+    let tracer = client::build_client_with(config, Policy::none(), Some(Arc::new(cookies)))?;
     let mut sources = Vec::new();
     for url in &request.sources {
         sources.push(trace(&tracer, config, request, url, proxy).await);
@@ -163,6 +172,13 @@ pub(crate) async fn report(
         findings: Vec::new(),
     };
     report.findings = findings(config, request, &report);
+    if own.is_some() {
+        let site = request.url().host_str().unwrap_or_default();
+        report.findings.push(Finding::new(
+            Level::Note,
+            format!("Your cookies go only to {site} and its subdomains, not to mirrors or CDNs."),
+        ));
+    }
     if !removed.is_empty() {
         report.findings.push(Finding::new(
             Level::Note,
@@ -300,7 +316,7 @@ fn network(headers: &HeaderMap) -> Option<&'static str> {
 async fn check_ip(config: &EngineConfig, options: &ExposureOptions) -> Result<IpCheck> {
     let service = Url::parse(&options.ip_service)
         .map_err(|_| EngineError::InvalidUrl(options.ip_service.clone()))?;
-    let through = client::build_client_with(config, Policy::limited(3))?;
+    let through = client::build_client_with(config, Policy::limited(3), None)?;
     let seen = echo(&through, &service).await;
     let direct = if options.compare_direct {
         let config = EngineConfig {
@@ -308,7 +324,7 @@ async fn check_ip(config: &EngineConfig, options: &ExposureOptions) -> Result<Ip
             require_proxy: false,
             ..config.clone()
         };
-        let direct = client::build_client_with(&config, Policy::limited(3))?;
+        let direct = client::build_client_with(&config, Policy::limited(3), None)?;
         Some(echo(&direct, &service).await)
     } else {
         None
@@ -421,9 +437,14 @@ fn findings(
                 found.push(Finding::new(
                     Level::Note,
                     format!(
-                        "{} tries to set cookies ({}); Hiroi does not keep them.",
+                        "{} sets cookies ({}); {}",
                         hop.host,
-                        hop.cookies_set.join(", ")
+                        hop.cookies_set.join(", "),
+                        if config.cookie_jar {
+                            "Hiroi keeps them in memory for this download only."
+                        } else {
+                            "Hiroi does not keep them."
+                        }
                     ),
                 ));
             }
@@ -447,16 +468,12 @@ fn findings(
         }
     }
 
-    let sent: Vec<&str> = [
-        (REFERER, "Referer"),
-        (COOKIE, "cookies"),
-        (AUTHORIZATION, "credentials"),
-    ]
-    .into_iter()
-    .filter(|(name, _)| request.headers.contains_key(name))
-    .filter(|(name, _)| !(config.no_referer && *name == REFERER))
-    .map(|(_, label)| label)
-    .collect();
+    let sent: Vec<&str> = [(REFERER, "Referer"), (AUTHORIZATION, "credentials")]
+        .into_iter()
+        .filter(|(name, _)| request.headers.contains_key(name))
+        .filter(|(name, _)| !(config.no_referer && *name == REFERER))
+        .map(|(_, label)| label)
+        .collect();
     if !sent.is_empty() {
         found.push(Finding::new(
             Level::Warning,

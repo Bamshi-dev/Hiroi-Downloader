@@ -266,7 +266,7 @@ impl Track<'_> {
         let gate = shared.hosts.gate(&host_key(&piece.url));
         let _host = or_cancel(&ctx.cancel, gate.acquire()).await?;
 
-        let mut request = shared
+        let mut request = ctx
             .client
             .get(piece.url.clone())
             .headers(ctx.request.headers.clone());

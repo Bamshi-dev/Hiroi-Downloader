@@ -101,7 +101,11 @@ async fn fetch(
         total: transfer.total_size,
     };
     let headers = &transfer.ctx.request.headers;
-    let body = or_cancel(cancel, protocol::open(shared, source, headers, &gate, want)).await??;
+    let body = or_cancel(
+        cancel,
+        protocol::open(shared, &transfer.ctx.client, source, headers, &gate, want),
+    )
+    .await??;
     receive(transfer, segment, body, slot).await
 }
 
@@ -175,7 +179,12 @@ async fn flush(transfer: &Transfer, segment: &Segment, buffer: Vec<u8>) -> Fetch
 async fn refresh(transfer: &Transfer, source: &Source) -> Result<bool> {
     source.mark_refreshed();
     let ctx = &transfer.ctx;
-    let probe = protocol::probe(&ctx.shared, source.original(), &ctx.request.headers);
+    let probe = protocol::probe(
+        &ctx.shared,
+        &ctx.client,
+        source.original(),
+        &ctx.request.headers,
+    );
     let fresh = match or_cancel(&transfer.cancel, probe).await? {
         Ok(remote) => remote,
         Err(_) => return Ok(false),

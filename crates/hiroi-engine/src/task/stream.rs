@@ -67,7 +67,7 @@ async fn fetch(
     let _host = or_cancel(&ctx.cancel, gate.acquire()).await?;
 
     let headers = &ctx.request.headers;
-    let open = protocol::open(shared, source, headers, &gate, Want::Whole);
+    let open = protocol::open(shared, &ctx.client, source, headers, &gate, Want::Whole);
     let mut body = or_cancel(&ctx.cancel, open).await??;
     let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
     let mut written = 0u64;

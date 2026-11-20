@@ -57,6 +57,10 @@ pub struct EngineConfig {
     pub strip_tracking: bool,
     /// Never send a Referer, even when a browser handed one over.
     pub no_referer: bool,
+    /// Keep the cookies servers set during a download, in memory and for
+    /// that download only. Some download pages set a session cookie and
+    /// then redirect to the file, which fails without it.
+    pub cookie_jar: bool,
 }
 
 impl Default for EngineConfig {
@@ -86,6 +90,7 @@ impl Default for EngineConfig {
             require_proxy: false,
             strip_tracking: false,
             no_referer: false,
+            cookie_jar: true,
         }
     }
 }
