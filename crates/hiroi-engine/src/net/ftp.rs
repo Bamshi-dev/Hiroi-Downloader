@@ -14,9 +14,10 @@
 //!   with the certificate checked against the system's trust store, as
 //!   for HTTPS. Plain `ftp://` sends the password and the file in clear
 //!   text, and we say so in the log.
-//! - FTP does not go through the HTTP or SOCKS proxy, so with a proxy
-//!   set we refuse it instead of connecting directly and exposing the
-//!   user's address.
+//! - With a SOCKS5 proxy set, the control connection and every data
+//!   connection go through it. An HTTP proxy cannot carry FTP well, so
+//!   with one set we refuse instead of connecting directly and exposing
+//!   the user's address.
 //! - Paths and credentials are checked for line breaks, which would let
 //!   a URL smuggle extra commands into the session.
 
@@ -36,6 +37,7 @@ use crate::net::probe::RemoteFile;
 use crate::net::protocol::{Body, Want};
 use crate::net::retry::{FetchError, FetchResult};
 use crate::net::source::Source;
+use crate::net::tunnel::Route;
 use crate::net::{display_url, host_key};
 use crate::storage::naming;
 use crate::task::EngineShared;
@@ -151,11 +153,7 @@ fn body(shared: &EngineShared, session: Session, transfer: Transfer) -> Body {
 
 /// Opens a logged-in session in binary mode.
 async fn connect(shared: &EngineShared, url: &Url, gate: &HostGate) -> FetchResult<Session> {
-    if shared.config.proxy.is_some() {
-        return Err(FetchError::Fatal(EngineError::Protocol(
-            "FTP cannot go through the proxy; refusing to connect directly".into(),
-        )));
-    }
+    let route = Route::from_config(&shared.config, "FTP")?;
     let host = url
         .host_str()
         .ok_or_else(|| FetchError::Fatal(EngineError::InvalidUrl(display_url(url))))?
@@ -169,15 +167,27 @@ async fn connect(shared: &EngineShared, url: &Url, gate: &HostGate) -> FetchResu
         tracing::debug!(url = %display_url(url), "plain FTP: the password and the data are not encrypted");
     }
 
-    let address = tokio::net::lookup_host((host.as_str(), port))
-        .await
-        .map_err(|e| FetchError::Connection(format!("could not resolve the server: {e}")))?
-        .next()
-        .ok_or_else(|| FetchError::Connection("the server has no address".into()))?;
+    let timeout = shared.config.connect_timeout;
+    let control = route.connect(&host, port, timeout).await?;
+    // EPSV names only a port; data connections go to the same host, by
+    // name, along the same route. The address suppaftp offers would be
+    // the proxy's when there is one.
+    let data_host = host.clone();
     let session = async {
-        let mut session = Session::connect_timeout(address, shared.config.connect_timeout)
+        let mut session = Session::connect_with_stream(control)
             .await
-            .map_err(|e| reply_error(e, gate))?;
+            .map_err(|e| reply_error(e, gate))?
+            .passive_stream_builder(move |address| {
+                let (route, host) = (route.clone(), data_host.clone());
+                Box::pin(async move {
+                    route
+                        .connect(&host, address.port(), timeout)
+                        .await
+                        .map_err(|e| {
+                            FtpError::ConnectionError(std::io::Error::other(e.to_string()))
+                        })
+                })
+            });
         session.set_mode(Mode::ExtendedPassive);
         if secure {
             session = session

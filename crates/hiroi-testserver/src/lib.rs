@@ -4,8 +4,10 @@
 //! FTP server sits next to it.
 
 mod ftp;
+mod socks;
 
 pub use ftp::{FtpBehavior, FtpServer};
+pub use socks::SocksProxy;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

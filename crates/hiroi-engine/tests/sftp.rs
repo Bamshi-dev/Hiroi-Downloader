@@ -326,3 +326,40 @@ async fn wrong_passwords_stop_the_download() {
         snapshot.status
     );
 }
+
+#[tokio::test]
+async fn socks_proxies_carry_sftp() {
+    let data = content(300_000, 10);
+    let (_server, port) = SshServer::start(HashMap::from([("/f.bin".into(), data.clone())])).await;
+    let proxy = hiroi_testserver::SocksProxy::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let hosts = dir.path().join("known_hosts");
+    let public = host_key(7).public_key().to_openssh().unwrap();
+    std::fs::write(&hosts, format!("[localhost]:{port} {public}\n")).unwrap();
+    let engine = Engine::new(EngineConfig {
+        progress_interval: Duration::from_millis(50),
+        ssh_known_hosts: Some(hosts),
+        proxy: Some(proxy.url(true)),
+        ..EngineConfig::default()
+    })
+    .unwrap();
+
+    let url = format!("sftp://hiro:s3cret@localhost:{port}/f.bin");
+    let request = DownloadRequest::new(&url).unwrap().output_dir(dir.path());
+    let snapshot = run(&engine, request).await;
+
+    assert_eq!(
+        snapshot.status,
+        DownloadStatus::Completed,
+        "{:?}",
+        snapshot.status
+    );
+    assert_eq!(std::fs::read(dir.path().join("f.bin")).unwrap(), data);
+    assert!(
+        proxy
+            .targets()
+            .iter()
+            .all(|t| *t == format!("localhost:{port}"))
+    );
+    assert!(!proxy.targets().is_empty());
+}

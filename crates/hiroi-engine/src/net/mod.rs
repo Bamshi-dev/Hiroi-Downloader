@@ -12,6 +12,8 @@ pub mod retry;
 pub(crate) mod sftp;
 pub(crate) mod source;
 pub(crate) mod tls;
+#[cfg(any(feature = "ftp", feature = "sftp"))]
+pub(crate) mod tunnel;
 
 use reqwest::Url;
 

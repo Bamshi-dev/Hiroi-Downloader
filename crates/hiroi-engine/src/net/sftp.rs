@@ -16,8 +16,9 @@
 //!   middle of the connection looks like.
 //!
 //! The login is the password in the URL, else the keys ssh-agent
-//! offers, else the unencrypted keys in `~/.ssh`. Like FTP, SFTP cannot
-//! go through the HTTP or SOCKS proxy, so it is refused while one is set.
+//! offers, else the unencrypted keys in `~/.ssh`. Like FTP, SFTP goes
+//! through a SOCKS5 proxy when one is set, and is refused with an HTTP
+//! proxy rather than connecting around it.
 //!
 //! [`EngineConfig::ssh_known_hosts`]: crate::EngineConfig::ssh_known_hosts
 
@@ -44,6 +45,7 @@ use crate::net::probe::RemoteFile;
 use crate::net::protocol::{Body, Want};
 use crate::net::retry::{FetchError, FetchResult};
 use crate::net::source::Source;
+use crate::net::tunnel::Route;
 use crate::storage::naming;
 use crate::task::EngineShared;
 
@@ -119,11 +121,7 @@ fn body(shared: &EngineShared, session: Session, file: File) -> Body {
 }
 
 async fn connect(shared: &EngineShared, url: &Url) -> FetchResult<Session> {
-    if shared.config.proxy.is_some() {
-        return Err(FetchError::Fatal(EngineError::Protocol(
-            "SFTP cannot go through the proxy; refusing to connect directly".into(),
-        )));
-    }
+    let route = Route::from_config(&shared.config, "SFTP")?;
     let host = url
         .host_str()
         .ok_or_else(|| FetchError::Fatal(EngineError::InvalidUrl(display_url(url))))?
@@ -143,8 +141,11 @@ async fn connect(shared: &EngineShared, url: &Url) -> FetchResult<Session> {
         ..client::Config::default()
     });
 
+    let stream = route
+        .connect(&host, port, shared.config.connect_timeout)
+        .await?;
     let session = async {
-        let mut ssh = client::connect(config, (host.as_str(), port), check)
+        let mut ssh = client::connect_stream(config, stream, check)
             .await
             .map_err(|error| match verdict.lock().take() {
                 // The host check failed: that is the reason, not the

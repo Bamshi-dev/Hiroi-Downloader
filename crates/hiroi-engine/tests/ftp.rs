@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use hiroi_engine::{DownloadRequest, DownloadStatus, Engine, EngineConfig, RetryPolicy};
-use hiroi_testserver::{Behavior, FtpBehavior, FtpServer, TestServer, content};
+use hiroi_testserver::{Behavior, FtpBehavior, FtpServer, SocksProxy, TestServer, content};
 
 fn engine(config: EngineConfig) -> Engine {
     Engine::new(EngineConfig {
@@ -193,12 +193,45 @@ async fn ftp_mirrors_share_a_download_with_http() {
 }
 
 #[tokio::test]
-async fn a_proxy_rules_ftp_out() {
+async fn socks_proxies_carry_control_and_data() {
+    let server = FtpServer::start(FtpBehavior::default()).await;
+    let data = content(400_000, 9);
+    server.put("f.bin", data.clone());
+    let url = server.url("f.bin").replace("127.0.0.1", "localhost");
+
+    for remote_dns in [true, false] {
+        let proxy = SocksProxy::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let config = EngineConfig {
+            proxy: Some(proxy.url(remote_dns)),
+            ..EngineConfig::default()
+        };
+        let request = DownloadRequest::new(&url).unwrap().output_dir(dir.path());
+        let snapshot = run(&engine(config), request).await;
+
+        assert_eq!(
+            snapshot.status,
+            DownloadStatus::Completed,
+            "{:?}",
+            snapshot.status
+        );
+        assert_eq!(std::fs::read(dir.path().join("f.bin")).unwrap(), data);
+        let targets = proxy.targets();
+        // A probe and a download session, each with a data connection
+        // for RETR beyond the control connection.
+        assert!(targets.len() >= 3, "{targets:?}");
+        let sent_name = targets.iter().all(|t| t.starts_with("localhost:"));
+        assert_eq!(sent_name, remote_dns, "{targets:?}");
+    }
+}
+
+#[tokio::test]
+async fn http_proxies_rule_ftp_out() {
     let server = FtpServer::start(FtpBehavior::default()).await;
     server.put("f.bin", b"x".to_vec());
     let dir = tempfile::tempdir().unwrap();
     let config = EngineConfig {
-        proxy: Some("socks5h://127.0.0.1:9".into()),
+        proxy: Some("http://127.0.0.1:9".into()),
         ..EngineConfig::default()
     };
 
@@ -208,7 +241,7 @@ async fn a_proxy_rules_ftp_out() {
     let snapshot = run(&engine(config), request).await;
 
     assert!(
-        matches!(&snapshot.status, DownloadStatus::Failed(m) if m.contains("proxy")),
+        matches!(&snapshot.status, DownloadStatus::Failed(m) if m.contains("SOCKS5")),
         "{:?}",
         snapshot.status
     );

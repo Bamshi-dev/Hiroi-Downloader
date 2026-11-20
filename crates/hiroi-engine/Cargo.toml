@@ -32,6 +32,7 @@ suppaftp = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls = { workspace = true, optional = true }
+tokio-socks = { workspace = true, optional = true }
 tokio-util.workspace = true
 tracing.workspace = true
 
@@ -39,9 +40,9 @@ tracing.workspace = true
 # Entry points for the fuzz targets in fuzz/; not a public API.
 fuzzing = []
 # FTP and FTPS sources, off by default.
-ftp = ["dep:suppaftp", "dep:tokio-rustls"]
+ftp = ["dep:suppaftp", "dep:tokio-rustls", "dep:tokio-socks"]
 # SFTP sources, checked against known_hosts. Off by default.
-sftp = ["dep:russh", "dep:russh-sftp"]
+sftp = ["dep:russh", "dep:russh-sftp", "dep:tokio-socks"]
 # BitTorrent and magnet links. Peers see the address you download from.
 torrent = ["dep:librqbit"]
 
