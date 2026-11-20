@@ -37,10 +37,24 @@ followed, and FTP, FTPS, SFTP, and BitTorrent are optional features.
 
 The background service keeps a queue in SQLite, runs queues on a
 schedule, sorts downloads into folders by type, and accepts links from
-the browser extension and the clipboard. `hiroi exposure` shows who
-would see a download and what it would give away, and
-`--require-proxy`, `--strip-tracking`, and `--no-referer` send less.
+the browser extension and the clipboard. Downloads added together form
+a group, named after them when you give no name, and finished episodes
+of a series (`talk 1`, `talk 2`, ...) gather in a folder of their own.
+
+The browser extension adds right-click menus for links, pictures,
+videos, selections, and whole pages, finds the media a tab plays, and
+can take over the browser's own downloads.
+
+`hiroi exposure` shows who would see a download and what it would give
+away. Downloads can be bound to a VPN's interface, so they stop when
+the VPN drops, kept away from the addresses of an IP filter, and kept
+from being redirected into the local network; `--require-proxy`,
+`--strip-tracking`, `--no-referer`, and `--anonymous` send less.
 Cookies and credentials are never written to disk or to a log.
+
+Every setting can be kept in a settings file, and `hiroi search` finds
+a setting, a command, or an option by what it does. The
+[guide](docs/README.md) explains every feature.
 
 ## Requirements
 
@@ -83,7 +97,11 @@ hiroi exposure https://example.com/big.iso                  # who would see it
 hiroi daemon &                                              # the background service
 hiroi add https://example.com/big.iso --queue night
 hiroi schedule add --queue night --from 01:00 --to 07:00
+hiroi add URL1 URL2 URL3 --group "Lecture videos"
 hiroi list
+
+hiroi settings set interface wg0                            # downloads stop if the VPN drops
+hiroi search proxy                                          # find a setting or an option
 ```
 
 Ctrl+C pauses `hiroi get`, and the same command continues. While a
@@ -124,15 +142,16 @@ the segment layout, ready for a segment bar.
 
 | Path | Contents |
 |---|---|
-| `crates/hiroi-engine/` | Downloads: probing, segments, limits, storage, streams, protocols, privacy |
+| `crates/hiroi-engine/` | Downloads: probing, segments, limits, storage, streams, protocols, network rules, privacy |
 | `crates/hiroi-grab/` | Reading web pages and finding what they offer |
+| `crates/hiroi-organize/` | Series in file names, and names for groups |
 | `crates/hiroi-proto/` | Messages between the service and its clients |
 | `crates/hiroi-store/` | The service's SQLite database |
 | `crates/hiroi-daemon/` | The background service, its client, and the browser's native host |
 | `crates/hiroi-cli/` | The `hiroi` command |
 | `crates/hiroi-testserver/` | Misbehaving HTTP and FTP servers for tests and benchmarks |
 | `extension/` | Browser extension for Firefox and Chromium-based browsers |
-
+| `docs/` | The guide to every feature |
 | `fuzz/` | cargo-fuzz targets (nightly) |
 | `bench/` | Benchmarks against curl, wget, and aria2 |
 | `contrib/` | A systemd user unit for the service |
@@ -140,8 +159,8 @@ the segment layout, ready for a segment bar.
 ## Tests
 
 ```sh
-cargo test --workspace                  # 160 tests
-cargo test --workspace --all-features   # 176, with FTP, SFTP, and torrents
+cargo test --workspace                  # 202 tests
+cargo test --workspace --all-features   # 221, with FTP, SFTP, and torrents
 ```
 
 The tests download from servers they start themselves, which throttle,
@@ -153,20 +172,23 @@ names. Every parser also gets 3000 mangled inputs on each run;
 ## Roadmap
 
 Done: the engine, the background service with its SQLite queue,
-queues and schedules, categories, the browser extension, the
-clipboard watcher, page grabbing, HLS and DASH streams, video sites
-through yt-dlp, Metalink, FTP, SFTP, BitTorrent, the exposure report,
-fuzzing, and benchmarks.
+queues and schedules, categories, groups and smart folders, the
+browser extension with its menus and media detection, the clipboard
+watcher, page grabbing, HLS and DASH streams, video sites through
+yt-dlp, Metalink with piece repair, FTP, SFTP, and BitTorrent (through
+SOCKS5 proxies where they can), interface binding, the IP filter, the
+exposure report, the settings file and search, fuzzing, and
+benchmarks.
 
 Next:
 
 - A GUI, which I want to build myself.
 - The background service on Windows (named pipes), and browser
   registration through the Windows registry.
+- Subtitles and the choice of audio language for streams.
+- Choosing which files of a torrent to download, and seeding limits.
 - Telegram and other apps as sources. The engine's protocol boundary
   (probe a source, open a range of it) is where they would plug in.
-- Implicit FTPS on port 990, and choosing which files of a torrent to
-  download.
 
 ## License
 
