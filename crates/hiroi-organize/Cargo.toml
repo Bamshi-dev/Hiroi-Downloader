@@ -1,0 +1,12 @@
+[package]
+name = "hiroi-organize"
+description = "Series detection and group names for Hiroi downloads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

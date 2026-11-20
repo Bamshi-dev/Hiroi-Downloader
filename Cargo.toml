@@ -13,6 +13,7 @@ license = "AGPL-3.0-or-later"
 hiroi-daemon = { path = "crates/hiroi-daemon" }
 hiroi-engine = { path = "crates/hiroi-engine" }
 hiroi-grab = { path = "crates/hiroi-grab" }
+hiroi-organize = { path = "crates/hiroi-organize" }
 hiroi-proto = { path = "crates/hiroi-proto" }
 hiroi-store = { path = "crates/hiroi-store" }
 hiroi-testserver = { path = "crates/hiroi-testserver" }

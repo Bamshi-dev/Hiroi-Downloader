@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
 use hiroi_grab::{GrabOptions, Grabber, Link, LinkKind};
-use hiroi_proto::{Request, Response};
+use hiroi_proto::NewBatch;
 use indicatif::HumanBytes;
 
 use crate::args::GrabArgs;
@@ -61,7 +61,7 @@ pub async fn run(
     }
     let chosen: Vec<&Link> = chosen.into_iter().map(|index| &links[index]).collect();
     if args.queue {
-        queue(&chosen, &args, socket).await
+        queue(&chosen, &args, report.title.clone(), socket).await
     } else {
         let requests = chosen
             .iter()
@@ -208,21 +208,23 @@ pub fn parse_pick(text: &str, count: usize) -> Result<Vec<usize>> {
 async fn queue(
     links: &[&Link],
     args: &GrabArgs,
+    title: Option<String>,
     socket: Option<std::path::PathBuf>,
 ) -> Result<ExitCode> {
     let mut client = jobs::connect(socket).await?;
+    let mut batch = NewBatch {
+        group: args.group.clone(),
+        title,
+        ..NewBatch::default()
+    };
     for link in links {
         let mut job = options::new_job(link.url.as_str(), &args.target, &args.request)?;
         if args.request.referer.is_none() {
             job.headers.push(("Referer".into(), link.page.to_string()));
         }
-        match client.call(Request::Add(Box::new(job))).await {
-            Ok(Response::Added { job }) => println!("{job}\t{}", link.url),
-            Ok(_) => {}
-            Err(error) => eprintln!("not added {}: {error}", link.url),
-        }
+        batch.jobs.push(job);
     }
-    Ok(ExitCode::SUCCESS)
+    jobs::add_batch(&mut client, batch).await
 }
 
 #[cfg(test)]

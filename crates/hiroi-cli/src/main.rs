@@ -75,6 +75,15 @@ async fn client_command(
             .await
         }
         Command::Stop => jobs::stop(&mut client).await,
+        Command::Group(command) => jobs::group(&mut client, command).await,
+        Command::SmartFolders { state } => {
+            let enabled = matches!(state, args::Switch::On);
+            jobs::switch(
+                &mut client,
+                hiroi_proto::Request::SetSmartFolders { enabled },
+            )
+            .await
+        }
         Command::Get(_)
         | Command::Info(_)
         | Command::Exposure(_)

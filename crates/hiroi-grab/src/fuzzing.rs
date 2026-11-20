@@ -18,7 +18,7 @@ pub fn page(data: &[u8]) {
     if extractor.feed(&data[..split]) {
         extractor.feed(&data[split..]);
     }
-    for link in extractor.finish() {
+    for link in extractor.finish().links {
         assert!(
             matches!(link.url.scheme(), "http" | "https"),
             "{}",

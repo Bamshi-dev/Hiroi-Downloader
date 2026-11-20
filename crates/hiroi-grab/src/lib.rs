@@ -31,7 +31,7 @@ use reqwest::{Client, StatusCode, Url};
 use tokio::sync::{Mutex, Semaphore};
 
 pub use extract::Found;
-use extract::{Extractor, RawLink};
+use extract::{Extractor, Parsed, RawLink};
 pub use kind::LinkKind;
 use robots::Robots;
 
@@ -117,6 +117,8 @@ pub struct Report {
     pub page_links: Vec<Link>,
     /// Pages that could not be read or were skipped, with the reason.
     pub skipped: Vec<(Url, String)>,
+    /// The first page's title.
+    pub title: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -194,7 +196,12 @@ impl Grabber {
             let mut next = Vec::new();
             for (page, result) in level.into_iter().zip(pages) {
                 let raw = match result {
-                    Ok(PageResult::Html(raw)) => raw,
+                    Ok(PageResult::Html(parsed)) => {
+                        if depth == 0 {
+                            report.title = parsed.title;
+                        }
+                        parsed.links
+                    }
                     // A "page" link that turned out to be a file.
                     Ok(PageResult::File(link)) => {
                         if seen_links.insert(link.url.clone()) {
@@ -307,7 +314,7 @@ struct Crawl<'a> {
 }
 
 enum PageResult {
-    Html(Vec<RawLink>),
+    Html(Parsed),
     File(Box<Link>),
 }
 

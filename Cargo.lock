@@ -1563,6 +1563,7 @@ dependencies = [
  "directories",
  "futures-util",
  "hiroi-engine",
+ "hiroi-organize",
  "hiroi-proto",
  "hiroi-store",
  "hiroi-testserver",
@@ -1628,6 +1629,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "hiroi-organize"
+version = "0.1.0"
 
 [[package]]
 name = "hiroi-proto"

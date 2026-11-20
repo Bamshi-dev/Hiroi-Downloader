@@ -26,6 +26,12 @@ pub fn job_options(job: &NewJob) -> JobOptions {
             .format
             .clone()
             .filter(|format| !format.trim().is_empty()),
+        group: job
+            .group
+            .as_deref()
+            .map(str::trim)
+            .filter(|group| !group.is_empty())
+            .map(str::to_string),
     }
 }
 
@@ -115,6 +121,7 @@ pub fn job(stored: &StoredJob, live: Option<&DownloadSnapshot>) -> Job {
         file_name: stored.file_name.clone(),
         path: stored.path.clone(),
         queue: stored.queue.clone(),
+        group: stored.options.group.clone(),
         status: stored.status,
         error: stored.error.clone(),
         total_size: stored.total_size,

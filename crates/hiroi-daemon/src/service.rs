@@ -16,8 +16,8 @@ use hiroi_engine::{
     DownloadId, DownloadListener, DownloadSnapshot, Engine, EngineConfig, EngineError,
 };
 use hiroi_proto::{
-    Categories, Event, Job, JobId, JobStatus, NewJob, QueueInfo, Request, Response, Schedule,
-    ScheduleAction,
+    BatchAdded, Categories, Event, GroupInfo, Job, JobId, JobStatus, NewBatch, NewJob, QueueInfo,
+    Request, Response, Schedule, ScheduleAction, ServiceSettings,
 };
 use hiroi_store::{InsertJob, JobUpdate, Store, StoreError, StoredJob};
 use parking_lot::Mutex;
@@ -25,7 +25,7 @@ use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::schedule::{self, Desired, Moment};
-use crate::{actions, category, convert, paths, server};
+use crate::{actions, category, convert, folders, paths, server};
 
 /// How often the progress of running jobs is written to the database.
 const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(5);
@@ -35,6 +35,7 @@ const DEFAULT_QUEUE: &str = "main";
 const GLOBAL_LIMIT_KEY: &str = "global_speed_limit";
 const CATEGORIES_KEY: &str = "categories";
 const NOTIFICATIONS_KEY: &str = "notifications";
+const SMART_FOLDERS_KEY: &str = "smart_folders";
 
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
@@ -155,6 +156,7 @@ struct State {
     base_limit: Option<u64>,
     categories: Option<Categories>,
     notifications: bool,
+    smart_folders: bool,
     power_off_when_done: bool,
 }
 
@@ -206,7 +208,7 @@ impl Service {
     /// paused and failed ones without starting.
     async fn restore(&self) -> Result<(), DaemonError> {
         let store = Arc::clone(&self.store);
-        let (rows, limit, stopped, schedules, categories, notifications) =
+        let (rows, limit, stopped, schedules, categories, switches) =
             tokio::task::spawn_blocking(move || {
                 Ok::<_, StoreError>((
                     store.jobs()?,
@@ -214,7 +216,10 @@ impl Service {
                     store.stopped_queues()?,
                     store.schedules()?,
                     store.setting(CATEGORIES_KEY)?,
-                    store.setting(NOTIFICATIONS_KEY)?,
+                    (
+                        store.setting(NOTIFICATIONS_KEY)?,
+                        store.setting(SMART_FOLDERS_KEY)?,
+                    ),
                 ))
             })
             .await
@@ -227,7 +232,8 @@ impl Service {
             state.stopped = stopped.into_iter().collect();
             state.schedules = schedules;
             state.categories = categories.and_then(|json| serde_json::from_str(&json).ok());
-            state.notifications = notifications.as_deref() != Some("off");
+            state.notifications = switches.0.as_deref() != Some("off");
+            state.smart_folders = switches.1.as_deref() != Some("off");
         }
         for row in rows {
             let id = row.id;
@@ -285,6 +291,25 @@ impl Service {
                 program: env!("CARGO_PKG_VERSION").to_string(),
             }),
             Request::Add(job) => self.add(*job).await.map(|job| Response::Added { job }),
+            Request::AddBatch(batch) => Ok(Response::Batch(self.add_batch(*batch).await)),
+            Request::Groups => Ok(Response::Groups {
+                groups: self.groups(),
+            }),
+            Request::PauseGroup { group } => self.pause_group(&group, true).map(done),
+            Request::ResumeGroup { group } => self.pause_group(&group, false).map(done),
+            Request::SetSmartFolders { enabled } => {
+                self.state.lock().smart_folders = enabled;
+                self.save_switch(SMART_FOLDERS_KEY, enabled);
+                Ok(Response::Done)
+            }
+            Request::ServiceSettings => {
+                let state = self.state.lock();
+                Ok(Response::ServiceSettings(ServiceSettings {
+                    notifications: state.notifications,
+                    smart_folders: state.smart_folders,
+                    global_speed_limit: state.base_limit,
+                }))
+            }
             Request::List => Ok(Response::Jobs { jobs: self.jobs() }),
             Request::Get { job } => self
                 .job(job)
@@ -320,10 +345,7 @@ impl Service {
             }
             Request::SetNotifications { enabled } => {
                 self.state.lock().notifications = enabled;
-                let value = if enabled { "on" } else { "off" };
-                let _ = self
-                    .writes
-                    .send(Write::Setting(NOTIFICATIONS_KEY.into(), value.into()));
+                self.save_switch(NOTIFICATIONS_KEY, enabled);
                 Ok(Response::Done)
             }
             Request::PowerOffWhenDone { enabled } => {
@@ -433,8 +455,112 @@ impl Service {
         Ok(id)
     }
 
+    fn save_switch(&self, key: &str, enabled: bool) {
+        let value = if enabled { "on" } else { "off" };
+        let _ = self.writes.send(Write::Setting(key.into(), value.into()));
+    }
+
+    /// Adds the jobs of a batch, in one group when there are several.
+    async fn add_batch(&self, batch: NewBatch) -> BatchAdded {
+        let group = (batch.jobs.len() > 1).then(|| {
+            batch
+                .group
+                .clone()
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| group_name(&batch))
+        });
+        let mut added = BatchAdded {
+            group: group.clone(),
+            ..BatchAdded::default()
+        };
+        for mut job in batch.jobs {
+            if job.group.is_none() {
+                job.group.clone_from(&group);
+            }
+            let url = convert::display_url(&job.url);
+            match self.add(job).await {
+                Ok(id) => added.jobs.push(id),
+                Err(error) => added.errors.push(format!("{url}: {error}")),
+            }
+        }
+        added
+    }
+
+    fn groups(&self) -> Vec<GroupInfo> {
+        let jobs = self.jobs();
+        let mut groups: BTreeMap<String, GroupInfo> = BTreeMap::new();
+        for job in &jobs {
+            let Some(name) = &job.group else {
+                continue;
+            };
+            let info = groups.entry(name.clone()).or_insert_with(|| GroupInfo {
+                name: name.clone(),
+                jobs: 0,
+                completed: 0,
+                downloaded: 0,
+                total_size: Some(0),
+            });
+            info.jobs += 1;
+            info.completed += usize::from(job.status == JobStatus::Completed);
+            info.downloaded += job.downloaded;
+            info.total_size = info.total_size.zip(job.total_size).map(|(a, b)| a + b);
+        }
+        groups.into_values().collect()
+    }
+
+    /// Pauses, or resumes, every job of `group` that can be.
+    fn pause_group(&self, group: &str, pause: bool) -> Result<(), String> {
+        let members: Vec<JobId> = {
+            let state = self.state.lock();
+            state
+                .rows
+                .values()
+                .filter(|row| row.options.group.as_deref() == Some(group))
+                .map(|row| row.id)
+                .collect()
+        };
+        if members.is_empty() {
+            return Err(format!("no group named {group}"));
+        }
+        for id in members {
+            // Finished jobs cannot be paused or resumed; that is fine here.
+            let _ = if pause {
+                self.pause(id)
+            } else {
+                self.resume(id)
+            };
+        }
+        Ok(())
+    }
+
+    /// Moves the job's file, and earlier episodes of its series, into a
+    /// folder of their own. See [`folders`].
+    fn gather_series(&self, id: JobId) {
+        let moves = {
+            let state = self.state.lock();
+            if !state.smart_folders {
+                return;
+            }
+            folders::plan(id, &state.rows)
+        };
+        for step in folders::apply(moves) {
+            tracing::info!(from = %step.from.display(), to = %step.to.display(), "moved into the series folder");
+            self.update(
+                step.job,
+                JobUpdate {
+                    path: Some(step.to),
+                    ..JobUpdate::default()
+                },
+            );
+        }
+    }
+
     /// Notification, the job's own command, and opening its folder.
     fn after_finish(&self, id: JobId, status: JobStatus) {
+        if status == JobStatus::Completed {
+            self.gather_series(id);
+        }
         let (row, notify) = {
             let state = self.state.lock();
             (state.rows.get(&id).cloned(), state.notifications)
@@ -892,9 +1018,6 @@ impl Service {
             finished_at: finished.then(now),
         };
         self.update(id, update);
-        if matches!(status, JobStatus::Completed | JobStatus::Failed) {
-            self.after_finish(id, status);
-        }
         if finished {
             // Finished jobs leave the engine; the row keeps their history.
             let mut state = self.state.lock();
@@ -903,6 +1026,9 @@ impl Service {
                 drop(state);
                 self.engine.remove(download);
             }
+        }
+        if matches!(status, JobStatus::Completed | JobStatus::Failed) {
+            self.after_finish(id, status);
         }
     }
 }
@@ -1036,6 +1162,33 @@ fn lowest(a: Option<u64>, b: Option<u64>) -> Option<u64> {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     }
+}
+
+/// A name for a batch the user did not name; see
+/// [`hiroi_organize::group_name`].
+fn group_name(batch: &NewBatch) -> String {
+    let names: Vec<String> = batch
+        .jobs
+        .iter()
+        .filter_map(|job| {
+            job.file_name
+                .clone()
+                .or_else(|| category::name_from_url(&job.url))
+        })
+        .collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let host = batch
+        .jobs
+        .first()
+        .and_then(|job| hiroi_engine::Url::parse(&job.url).ok())
+        .and_then(|url| url.host_str().map(str::to_string));
+    let date = jiff::ZonedDateTime::now().date().to_string();
+    hiroi_organize::group_name(hiroi_organize::Batch {
+        names: &names,
+        title: batch.title.as_deref(),
+        host: host.as_deref(),
+        date: &date,
+    })
 }
 
 fn now() -> i64 {

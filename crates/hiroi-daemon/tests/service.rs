@@ -464,3 +464,110 @@ async fn commands_run_after_downloads_and_power_off_waits_for_the_last_job() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(powered.exists(), "power off runs after the last job");
 }
+
+async fn add_batch(client: &mut Client, batch: hiroi_proto::NewBatch) -> hiroi_proto::BatchAdded {
+    match client
+        .call(Request::AddBatch(Box::new(batch)))
+        .await
+        .unwrap()
+    {
+        Response::Batch(added) => added,
+        other => panic!("unexpected reply {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn batches_get_a_group_and_series_get_a_folder() {
+    let server = TestServer::start(Behavior::default()).await;
+    let names = [
+        "gardening vid 1.mp4",
+        "gardening vid 2.mp4",
+        "gardening vid 3.mp4",
+    ];
+    for (seed, name) in names.iter().enumerate() {
+        server.put(&name.replace(' ', "_"), content(4096, seed as u64));
+    }
+    let fixture = Fixture::new();
+    let videos = fixture.downloads().join("Videos");
+    std::fs::create_dir_all(&videos).unwrap();
+    std::fs::write(videos.join("gardening vid 7.mp4"), b"not Hiroi's").unwrap();
+    let (_service, mut client) = fixture.start().await;
+
+    let jobs = names
+        .iter()
+        .map(|name| NewJob {
+            url: server.url(&name.replace(' ', "_")),
+            file_name: Some(name.to_string()),
+            ..NewJob::default()
+        })
+        .collect();
+    let added = add_batch(
+        &mut client,
+        hiroi_proto::NewBatch {
+            jobs,
+            ..Default::default()
+        },
+    )
+    .await;
+    assert_eq!(added.group.as_deref(), Some("gardening"));
+    assert!(added.errors.is_empty(), "{:?}", added.errors);
+    for &id in &added.jobs {
+        wait_for(&mut client, id, JobStatus::Completed).await;
+    }
+
+    let folder = videos.join("gardening");
+    for (&id, name) in added.jobs.iter().zip(names) {
+        assert!(folder.join(name).is_file(), "{name} was not moved");
+        assert_eq!(job(&mut client, id).await.path, Some(folder.join(name)));
+    }
+    assert!(videos.join("gardening vid 7.mp4").is_file());
+
+    let Response::Groups { groups } = client.call(Request::Groups).await.unwrap() else {
+        panic!("unexpected reply");
+    };
+    assert_eq!(groups.len(), 1);
+    assert_eq!((groups[0].jobs, groups[0].completed), (3, 3));
+    assert_eq!(groups[0].total_size, Some(3 * 4096));
+    assert!(
+        client
+            .call(Request::PauseGroup {
+                group: "nothing".into()
+            })
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn smart_folders_can_be_turned_off() {
+    let server = TestServer::start(Behavior::default()).await;
+    server.put("a", content(2048, 1));
+    server.put("b", content(2048, 2));
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+    client
+        .call(Request::SetSmartFolders { enabled: false })
+        .await
+        .unwrap();
+
+    for (url, name) in [("a", "algebra 1.pdf"), ("b", "algebra 2.pdf")] {
+        let id = add(
+            &mut client,
+            NewJob {
+                url: server.url(url),
+                file_name: Some(name.into()),
+                ..NewJob::default()
+            },
+        )
+        .await;
+        wait_for(&mut client, id, JobStatus::Completed).await;
+    }
+    let documents = fixture.downloads().join("Documents");
+    assert!(documents.join("algebra 1.pdf").is_file());
+    assert!(documents.join("algebra 2.pdf").is_file());
+    let Response::ServiceSettings(settings) = client.call(Request::ServiceSettings).await.unwrap()
+    else {
+        panic!("unexpected reply");
+    };
+    assert!(!settings.smart_folders);
+}

@@ -8,12 +8,13 @@ use anyhow::{Context, Result, bail};
 use hiroi_daemon::Client;
 use hiroi_daemon::schedule::{format_days, format_time, parse_days, parse_time};
 use hiroi_proto::{
-    Event, Job, JobId, JobStatus, Priority, Request, Response, Schedule, ScheduleAction,
+    Event, Job, JobId, JobStatus, NewBatch, Priority, Request, Response, Schedule, ScheduleAction,
 };
 use indicatif::{HumanBytes, MultiProgress, ProgressBar, ProgressStyle};
 
 use crate::args::{
-    AddArgs, CategoryCommand, IdsArg, JobsArg, LimitArgs, QueueCommand, ScheduleCommand,
+    AddArgs, CategoryCommand, GroupCommand, IdsArg, JobsArg, LimitArgs, QueueCommand,
+    ScheduleCommand,
 };
 use crate::commands::get::collect_urls;
 use crate::options;
@@ -29,6 +30,10 @@ pub async fn add(client: &mut Client, args: AddArgs) -> Result<ExitCode> {
     if urls.len() > 1 && (args.target.output.is_some() || args.target.checksum.is_some()) {
         bail!("--output and --checksum only work with a single URL");
     }
+    let mut batch = NewBatch {
+        group: args.group.clone(),
+        ..NewBatch::default()
+    };
     for url in urls {
         let mut job = options::new_job(&url, &args.target, &args.request)?;
         job.queue = args.queue.clone();
@@ -43,15 +48,76 @@ pub async fn add(client: &mut Client, args: AddArgs) -> Result<ExitCode> {
         if args.high_priority {
             job.priority = Some(Priority::High);
         }
-        match client
-            .call(Request::Add(Box::new(job)))
+        batch.jobs.push(job);
+    }
+    if let [job] = batch.jobs.as_mut_slice() {
+        job.group = batch.group.take();
+        let url = job.url.clone();
+        return match client
+            .call(Request::Add(Box::new(job.clone())))
             .await
             .with_context(|| format!("could not add {url}"))?
         {
-            Response::Added { job } => println!("{job}\t{url}"),
+            Response::Added { job } => {
+                println!("{job}\t{url}");
+                Ok(ExitCode::SUCCESS)
+            }
             other => bail!("unexpected reply {other:?}"),
-        }
+        };
     }
+    add_batch(client, batch).await
+}
+
+/// Adds several jobs as one group and prints what became of them.
+pub async fn add_batch(client: &mut Client, batch: NewBatch) -> Result<ExitCode> {
+    let urls: Vec<String> = batch.jobs.iter().map(|job| job.url.clone()).collect();
+    let Response::Batch(added) = client.call(Request::AddBatch(Box::new(batch))).await? else {
+        bail!("unexpected reply");
+    };
+    if let Some(group) = &added.group {
+        println!("Group: {group}");
+    }
+    for (id, url) in added.jobs.iter().zip(&urls) {
+        println!("{id}\t{url}");
+    }
+    for error in &added.errors {
+        eprintln!("not added: {error}");
+    }
+    Ok(if added.errors.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
+}
+
+pub async fn group(client: &mut Client, command: GroupCommand) -> Result<ExitCode> {
+    let request = match command {
+        GroupCommand::List => {
+            let Response::Groups { groups } = client.call(Request::Groups).await? else {
+                bail!("unexpected reply");
+            };
+            if groups.is_empty() {
+                println!("No groups.");
+            }
+            for group in groups {
+                let size = group
+                    .total_size
+                    .map(|total| format!(" of {}", HumanBytes(total)))
+                    .unwrap_or_default();
+                println!(
+                    "{}\t{}/{} done, {}{size}",
+                    group.name,
+                    group.completed,
+                    group.jobs,
+                    HumanBytes(group.downloaded)
+                );
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        GroupCommand::Pause { name } => Request::PauseGroup { group: name },
+        GroupCommand::Resume { name } => Request::ResumeGroup { group: name },
+    };
+    client.call(request).await?;
     Ok(ExitCode::SUCCESS)
 }
 

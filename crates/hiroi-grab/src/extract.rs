@@ -42,6 +42,8 @@ pub(crate) struct RawLink {
 const MAX_LABEL: usize = 120;
 /// Inline script text scanned per `<script>` element.
 const MAX_SCRIPT: usize = 2 * 1024 * 1024;
+/// Longest page title kept.
+const MAX_TITLE: usize = 200;
 
 #[derive(Default)]
 struct Collected {
@@ -49,6 +51,16 @@ struct Collected {
     links: Vec<RawLink>,
     open_anchor: Option<usize>,
     script: String,
+    title: String,
+    title_done: bool,
+}
+
+/// What a page holds.
+#[derive(Debug, Default)]
+pub(crate) struct Parsed {
+    pub links: Vec<RawLink>,
+    /// The page's `<title>`, whitespace collapsed.
+    pub title: Option<String>,
 }
 
 pub(crate) struct Extractor {
@@ -84,7 +96,9 @@ impl Extractor {
             metas,
             preloads,
             scripts,
+            title,
         ) = (
+            c(&collected),
             c(&collected),
             c(&collected),
             c(&collected),
@@ -252,6 +266,17 @@ impl Extractor {
                 }
                 Ok(())
             }))
+            .append_element_content_handler(text!("title", move |chunk| {
+                let mut state = lock(&title);
+                // The first <title> only; an SVG can carry more.
+                if !state.title_done {
+                    if state.title.len() < MAX_TITLE {
+                        state.title.push_str(chunk.as_str());
+                    }
+                    state.title_done = chunk.last_in_text_node();
+                }
+                Ok(())
+            }))
             .append_element_content_handler(text!("script", move |chunk| {
                 let mut state = lock(&scripts);
                 if state.script.len() < MAX_SCRIPT {
@@ -278,13 +303,18 @@ impl Extractor {
         self.rewriter.write(chunk).is_ok()
     }
 
-    pub fn finish(self) -> Vec<RawLink> {
+    pub fn finish(self) -> Parsed {
         let Self {
             rewriter,
             collected,
         } = self;
         let _ = rewriter.end();
-        std::mem::take(&mut lock(&collected).links)
+        let mut state = lock(&collected);
+        let title = state.title.split_whitespace().collect::<Vec<_>>().join(" ");
+        Parsed {
+            links: std::mem::take(&mut state.links),
+            title: (!title.is_empty()).then_some(title),
+        }
     }
 }
 
@@ -402,7 +432,7 @@ mod tests {
         for chunk in html.as_bytes().chunks(7) {
             assert!(extractor.feed(chunk));
         }
-        extractor.finish()
+        extractor.finish().links
     }
 
     fn urls(links: &[RawLink]) -> Vec<String> {
@@ -452,6 +482,16 @@ mod tests {
             .find(|l| l.url.path().ends_with("a.zip"))
             .unwrap();
         assert_eq!(anchor.label.as_deref(), Some("The archive"));
+    }
+
+    #[test]
+    fn reads_the_first_title() {
+        let mut extractor = Extractor::new(Url::parse("https://site.example/").unwrap());
+        extractor.feed(b"<title>\n  Lecture   videos | Site</title><svg><title>icon</title></svg>");
+        assert_eq!(
+            extractor.finish().title.as_deref(),
+            Some("Lecture videos | Site")
+        );
     }
 
     #[test]

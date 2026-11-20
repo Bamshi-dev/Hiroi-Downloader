@@ -53,6 +53,9 @@ pub enum Request {
     /// Protocol and program version.
     Version,
     Add(Box<NewJob>),
+    /// Several jobs added together, such as the links of a page. Two or
+    /// more get a group, named after them when no name is given.
+    AddBatch(Box<NewBatch>),
     List,
     Get {
         job: JobId,
@@ -98,6 +101,21 @@ pub enum Request {
     PowerOffWhenDone {
         enabled: bool,
     },
+    /// Groups with their job counts.
+    Groups,
+    PauseGroup {
+        group: String,
+    },
+    ResumeGroup {
+        group: String,
+    },
+    /// Move finished episodes of a series into a folder named after it
+    /// (on by default). Only files the service downloaded are moved.
+    SetSmartFolders {
+        enabled: bool,
+    },
+    /// The settings the service keeps itself.
+    ServiceSettings,
     Schedules,
     AddSchedule(Schedule),
     RemoveSchedule {
@@ -146,6 +164,20 @@ pub struct NewJob {
     pub extract: bool,
     /// yt-dlp format selection; implies `extract`.
     pub format: Option<String>,
+    /// Group the job belongs to, for listing and pausing together.
+    pub group: Option<String>,
+}
+
+/// Jobs to add together.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NewBatch {
+    pub jobs: Vec<NewJob>,
+    /// The group's name; made from the jobs, the page title, or the site
+    /// when absent. A job's own group wins.
+    pub group: Option<String>,
+    /// Title of the page the links came from, for naming the group.
+    pub title: Option<String>,
 }
 
 /// Which variant of a stream to download, when it offers several.
@@ -249,6 +281,7 @@ pub struct Job {
     pub file_name: Option<String>,
     pub path: Option<PathBuf>,
     pub queue: String,
+    pub group: Option<String>,
     pub status: JobStatus,
     /// Why the job failed, when it did.
     pub error: Option<String>,
@@ -298,7 +331,36 @@ pub enum Response {
     Schedules { schedules: Vec<Schedule> },
     Categories(Categories),
     ScheduleAdded { id: i64 },
+    Batch(BatchAdded),
+    Groups { groups: Vec<GroupInfo> },
+    ServiceSettings(ServiceSettings),
     Done,
+}
+
+/// What became of a batch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BatchAdded {
+    pub group: Option<String>,
+    pub jobs: Vec<JobId>,
+    /// Jobs that were not added, and why.
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupInfo {
+    pub name: String,
+    pub jobs: usize,
+    pub completed: usize,
+    pub downloaded: u64,
+    /// Known only when every job's size is.
+    pub total_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceSettings {
+    pub notifications: bool,
+    pub smart_folders: bool,
+    pub global_speed_limit: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

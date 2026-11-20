@@ -11,6 +11,7 @@ directories.workspace = true
 futures-util.workspace = true
 parking_lot.workspace = true
 hiroi-engine.workspace = true
+hiroi-organize.workspace = true
 hiroi-proto.workspace = true
 hiroi-store.workspace = true
 serde.workspace = true

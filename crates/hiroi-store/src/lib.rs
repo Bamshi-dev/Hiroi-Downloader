@@ -74,6 +74,7 @@ pub struct JobOptions {
     pub live_limit_secs: Option<u64>,
     pub extract: bool,
     pub format: Option<String>,
+    pub group: Option<String>,
 }
 
 /// A job about to be inserted; the store assigns the id.

@@ -92,9 +92,25 @@ pub enum Command {
     PowerOffWhenDone { state: Switch },
     /// Stop the background service; running jobs continue next time.
     Stop,
+    /// List, pause, or resume groups of jobs.
+    #[command(subcommand)]
+    Group(GroupCommand),
+    /// Move finished episodes of a series (`talk 1`, `talk 2`, ...) into
+    /// a folder named after it. On by default.
+    SmartFolders { state: Switch },
     /// Network interfaces, for binding downloads to a VPN.
     #[command(subcommand)]
     Network(NetworkCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum GroupCommand {
+    /// Groups with their progress.
+    List,
+    /// Pause every job of a group.
+    Pause { name: String },
+    /// Resume every job of a group.
+    Resume { name: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -178,6 +194,11 @@ pub struct GrabArgs {
     #[arg(long)]
     pub queue: bool,
 
+    /// Group for the queued links; named after them or the page when
+    /// not given.
+    #[arg(long, value_name = "NAME", requires = "queue")]
+    pub group: Option<String>,
+
     /// Downloads running at the same time.
     #[arg(short, long, default_value_t = 3)]
     pub jobs: usize,
@@ -229,6 +250,11 @@ pub struct AddArgs {
     /// Queue to put the jobs in.
     #[arg(short, long, value_name = "NAME")]
     pub queue: Option<String>,
+
+    /// Group to put the jobs in. Several URLs get a group named after
+    /// them when this is not given.
+    #[arg(short, long, value_name = "NAME")]
+    pub group: Option<String>,
 
     /// Add without starting.
     #[arg(long)]
