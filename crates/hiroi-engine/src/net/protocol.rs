@@ -9,10 +9,11 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use reqwest::header::{CONTENT_RANGE, HeaderMap, IF_RANGE, RANGE};
-use reqwest::{Client, Response, StatusCode, Url};
+use reqwest::{Response, StatusCode, Url};
 
 use crate::constants::DEFAULT_THROTTLE_PAUSE;
 use crate::limit::HostGate;
+use crate::net::client::Http;
 use crate::net::headers::parse_content_range;
 use crate::net::probe::{self, RemoteFile, retry_after};
 use crate::net::retry::{FetchError, FetchResult, is_throttle};
@@ -39,7 +40,7 @@ pub(crate) enum Want {
 #[cfg_attr(not(any(feature = "ftp", feature = "sftp")), allow(unused_variables))]
 pub(crate) async fn probe(
     shared: &EngineShared,
-    client: &Client,
+    client: &Http,
     url: &Url,
     headers: &HeaderMap,
 ) -> FetchResult<RemoteFile> {
@@ -57,7 +58,7 @@ pub(crate) async fn probe(
 #[cfg_attr(not(any(feature = "ftp", feature = "sftp")), allow(unused_variables))]
 pub(crate) async fn open(
     shared: &EngineShared,
-    client: &Client,
+    client: &Http,
     source: &Source,
     headers: &HeaderMap,
     gate: &HostGate,
@@ -73,13 +74,13 @@ pub(crate) async fn open(
 }
 
 async fn open_http(
-    client: &Client,
+    client: &Http,
     source: &Source,
     headers: &HeaderMap,
     gate: &HostGate,
     want: Want,
 ) -> FetchResult<Body> {
-    let mut request = client.get(source.url()).headers(headers.clone());
+    let mut request = client.get(&source.url())?.headers(headers.clone());
     if let Want::Range { start, end, .. } = want {
         request = request.header(RANGE, format!("bytes={start}-{}", end - 1));
         // If the file changed, the server answers 200 instead of mixing
@@ -88,7 +89,7 @@ async fn open_http(
             request = request.header(IF_RANGE, validator);
         }
     }
-    let response = request.send().await.map_err(FetchError::Transport)?;
+    let response = request.send().await.map_err(FetchError::from)?;
 
     let status = response.status();
     match (want, status) {
@@ -113,7 +114,7 @@ async fn open_http(
     }
     let body = response
         .bytes_stream()
-        .map(|chunk| chunk.map_err(FetchError::Transport));
+        .map(|chunk| chunk.map_err(FetchError::from));
     Ok(Box::pin(body))
 }
 

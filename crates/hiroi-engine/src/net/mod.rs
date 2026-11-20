@@ -4,7 +4,9 @@ pub(crate) mod client;
 pub(crate) mod cookies;
 #[cfg(feature = "ftp")]
 pub(crate) mod ftp;
+pub(crate) mod guard;
 pub(crate) mod headers;
+pub mod ipfilter;
 pub(crate) mod probe;
 pub(crate) mod protocol;
 pub mod retry;

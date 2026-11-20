@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use reqwest::Client;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -23,8 +22,9 @@ use crate::inspect;
 use crate::limit::{HostLimiter, RateLimiter};
 use crate::media;
 use crate::metalink;
-use crate::net::client;
+use crate::net::client::{self, Http};
 use crate::net::cookies::DownloadCookies;
+use crate::net::guard::Network;
 use crate::net::probe::RemoteFile;
 use crate::net::source::SourcePool;
 use crate::request::{ConflictPolicy, DownloadRequest};
@@ -39,7 +39,9 @@ use crate::storage::remove_if_exists;
 #[derive(Debug)]
 pub(crate) struct EngineShared {
     pub config: EngineConfig,
-    pub client: Client,
+    pub network: Network,
+    /// For requests that belong to no download.
+    pub client: Http,
     pub hosts: HostLimiter,
     pub connections: Semaphore,
     pub global_rate: RateLimiter,
@@ -56,8 +58,8 @@ pub(crate) trait TaskObserver: Send + Sync {
 }
 
 pub(crate) struct TaskContext {
-    /// This download's HTTP client, with its own cookies.
-    pub client: Client,
+    /// This download's HTTP client, with its own cookies and rules.
+    pub client: Http,
     pub id: DownloadId,
     pub request: Arc<DownloadRequest>,
     pub shared: Arc<EngineShared>,
@@ -73,7 +75,7 @@ impl TaskContext {
     /// set. The Cookie header leaves the request: the client adds it to
     /// the requests that may carry it.
     pub fn with_own_client(mut self) -> Result<Self> {
-        let (request, client) = own_client(&self.shared.config, &self.request)?;
+        let (request, client) = own_client(&self.shared, &self.request)?;
         self.client = client;
         self.request = Arc::new(request);
         Ok(self)
@@ -100,9 +102,10 @@ impl TaskContext {
 /// A client for `request`, and the request without its Cookie header,
 /// which the client now adds where it belongs.
 pub(crate) fn own_client(
-    config: &EngineConfig,
+    shared: &EngineShared,
     request: &DownloadRequest,
-) -> Result<(DownloadRequest, Client)> {
+) -> Result<(DownloadRequest, Http)> {
+    let config = &shared.config;
     let mut request = request.clone();
     let own = request
         .headers
@@ -112,7 +115,8 @@ pub(crate) fn own_client(
     if own.is_some() {
         request.own_cookies = own;
     }
-    Ok((request, client::download_client(config, cookies)?))
+    let guard = shared.network.guard(&request.sources);
+    Ok((request, client::download_client(config, cookies, guard)?))
 }
 
 impl std::fmt::Debug for TaskContext {

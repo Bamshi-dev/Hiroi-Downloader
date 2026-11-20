@@ -28,6 +28,7 @@ use crate::error::{EngineError, Result};
 use crate::net::client;
 use crate::net::cookies::DownloadCookies;
 use crate::net::display_url;
+use crate::net::guard::{Guard, Network};
 use crate::privacy::{self, ProxyKind};
 use crate::request::DownloadRequest;
 
@@ -130,6 +131,7 @@ impl Finding {
 
 pub(crate) async fn report(
     config: &EngineConfig,
+    network: &Network,
     request: &DownloadRequest,
     options: &ExposureOptions,
 ) -> Result<ExposureReport> {
@@ -155,13 +157,15 @@ pub(crate) async fn report(
     let cookies = DownloadCookies::new(request.url(), own.as_deref(), config.cookie_jar);
     let request = &request;
     // A client that stops at every redirect, so each hop can be seen.
-    let tracer = client::build_client_with(config, Policy::none(), Some(Arc::new(cookies)))?;
+    let guard = network.guard(&request.sources);
+    let tracer =
+        client::build_client_with(config, Policy::none(), Some(Arc::new(cookies)), &guard)?;
     let mut sources = Vec::new();
     for url in &request.sources {
-        sources.push(trace(&tracer, config, request, url, proxy).await);
+        sources.push(trace(&tracer, &guard, config, request, url, proxy).await);
     }
     let public_ip = if options.check_ip {
-        Some(check_ip(config, options).await?)
+        Some(check_ip(config, network, options).await?)
     } else {
         None
     };
@@ -196,6 +200,7 @@ pub(crate) async fn report(
 
 async fn trace(
     client: &Client,
+    guard: &Guard,
     config: &EngineConfig,
     request: &DownloadRequest,
     start: &Url,
@@ -230,6 +235,11 @@ async fn trace(
                 hop.addresses = found.map(|address| address.ip()).collect();
                 hop.addresses.dedup();
             }
+        }
+        if let Err(refused) = guard.check_url(&url) {
+            trace.error = Some(format!("not connecting: {refused}"));
+            trace.hops.push(hop);
+            break;
         }
         // The first byte only, like the probe of a real download.
         let sent = client
@@ -313,10 +323,15 @@ fn network(headers: &HeaderMap) -> Option<&'static str> {
     }
 }
 
-async fn check_ip(config: &EngineConfig, options: &ExposureOptions) -> Result<IpCheck> {
+async fn check_ip(
+    config: &EngineConfig,
+    network: &Network,
+    options: &ExposureOptions,
+) -> Result<IpCheck> {
     let service = Url::parse(&options.ip_service)
         .map_err(|_| EngineError::InvalidUrl(options.ip_service.clone()))?;
-    let through = client::build_client_with(config, Policy::limited(3), None)?;
+    let guard = Guard::open(network);
+    let through = client::build_client_with(config, Policy::limited(3), None, &guard)?;
     let seen = echo(&through, &service).await;
     let direct = if options.compare_direct {
         let config = EngineConfig {
@@ -324,7 +339,7 @@ async fn check_ip(config: &EngineConfig, options: &ExposureOptions) -> Result<Ip
             require_proxy: false,
             ..config.clone()
         };
-        let direct = client::build_client_with(&config, Policy::limited(3), None)?;
+        let direct = client::build_client_with(&config, Policy::limited(3), None, &guard)?;
         Some(echo(&direct, &service).await)
     } else {
         None
@@ -506,6 +521,8 @@ fn findings(
         }
     }
 
+    found.extend(network_findings(config));
+
     if let Some(check) = &report.public_ip {
         match (&check.seen, &check.direct) {
             (Ok(seen), Some(Ok(direct))) if seen == direct && report.proxy != ProxyKind::None => {
@@ -534,6 +551,53 @@ fn findings(
         "This shows who can see the download, not what they do with it. Whether a server \
          keeps logs, shares them, or reports the visit cannot be observed from here.",
     ));
+    found
+}
+
+/// What the network settings change about the picture above.
+fn network_findings(config: &EngineConfig) -> Vec<Finding> {
+    let mut found = Vec::new();
+    match (&config.interface, config.bind_address) {
+        (Some(name), _) => found.push(Finding::new(
+            Level::Note,
+            format!(
+                "Connections are bound to {name}; downloads stop when it goes down. \
+                 Host names are still looked up by the system's resolver, which may \
+                 not use {name}; socks5h:// avoids that."
+            ),
+        )),
+        (None, Some(address)) => found.push(Finding::new(
+            Level::Note,
+            format!("Connections start from {address}."),
+        )),
+        (None, None) => {}
+    }
+    if config.ip_filter.is_some() {
+        found.push(Finding::new(
+            Level::Note,
+            "The IP filter applies to addresses looked up here. With a proxy that \
+             resolves names itself, only addresses written in a link are checked.",
+        ));
+    }
+    if config.allow_local_redirects {
+        found.push(Finding::new(
+            Level::Warning,
+            "Remote sites may send downloads into your local network; turn \
+             allow-local-redirects off unless you need it.",
+        ));
+    }
+    if config.accept_invalid_certificates {
+        found.push(Finding::new(
+            Level::Risk,
+            "Certificates are not checked: anyone on the way can read and change HTTPS downloads.",
+        ));
+    }
+    if config.anonymous {
+        found.push(Finding::new(
+            Level::Note,
+            "Anonymous mode: no Hiroi User-Agent, no Referer, and tracking parameters removed.",
+        ));
+    }
     found
 }
 

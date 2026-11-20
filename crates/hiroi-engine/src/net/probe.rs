@@ -4,7 +4,9 @@ use reqwest::header::{
     CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG, HeaderMap,
     LAST_MODIFIED, RANGE, RETRY_AFTER,
 };
-use reqwest::{Client, Response, StatusCode, Url};
+use reqwest::{Response, StatusCode, Url};
+
+use crate::net::client::Http;
 
 use crate::net::headers;
 use crate::net::retry::{FetchError, FetchResult};
@@ -29,16 +31,16 @@ pub(crate) struct RemoteFile {
 /// with the full size in `Content-Range`, all in one round trip. This works
 /// on more servers than a `HEAD` request.
 pub(crate) async fn probe(
-    client: &Client,
+    client: &Http,
     url: &Url,
     headers: &HeaderMap,
 ) -> FetchResult<RemoteFile> {
-    let request = || client.get(url.clone()).headers(headers.clone());
-    let mut response = request()
+    let request = || Ok::<_, FetchError>(client.get(url)?.headers(headers.clone()));
+    let mut response = request()?
         .header(RANGE, "bytes=0-0")
         .send()
         .await
-        .map_err(FetchError::Transport)?;
+        .map_err(FetchError::from)?;
 
     // A 416 for the very first byte means the file is empty.
     if response.status() == StatusCode::RANGE_NOT_SATISFIABLE {
@@ -47,7 +49,7 @@ pub(crate) async fn probe(
 
     // A few servers reject range requests outright; ask once more without.
     if rejects_ranges(response.status()) {
-        response = request().send().await.map_err(FetchError::Transport)?;
+        response = request()?.send().await.map_err(FetchError::from)?;
     }
 
     let status = response.status();

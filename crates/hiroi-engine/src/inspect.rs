@@ -8,11 +8,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use reqwest::{Client, Url};
+use reqwest::Url;
 use tokio_util::sync::CancellationToken;
 
 use crate::constants::DEFAULT_THROTTLE_PAUSE;
 use crate::error::{EngineError, Result};
+use crate::net::client::Http;
 use crate::net::probe::RemoteFile;
 use crate::net::protocol;
 use crate::net::retry::{FetchError, RetryAction, is_throttle};
@@ -56,7 +57,7 @@ pub(crate) type RetryHook<'a> = &'a (dyn Fn(&str, Duration) + Sync);
 /// Probes every source of `request` at the same time.
 pub(crate) async fn probe_all(
     shared: &EngineShared,
-    client: &Client,
+    client: &Http,
     request: &DownloadRequest,
     cancel: &CancellationToken,
     on_retry: RetryHook<'_>,
@@ -168,7 +169,7 @@ fn disagreement(base: &RemoteFile, mirror: &RemoteFile) -> Option<&'static str> 
 
 async fn probe_with_retry(
     shared: &EngineShared,
-    client: &Client,
+    client: &Http,
     request: &DownloadRequest,
     url: &Url,
     cancel: &CancellationToken,

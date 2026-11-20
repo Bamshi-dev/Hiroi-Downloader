@@ -268,14 +268,14 @@ impl Track<'_> {
 
         let mut request = ctx
             .client
-            .get(piece.url.clone())
+            .get(&piece.url)?
             .headers(ctx.request.headers.clone());
         if let Some((start, end)) = piece.range {
             request = request.header(RANGE, format!("bytes={start}-{}", end - 1));
         }
         let response = or_cancel(&ctx.cancel, request.send())
             .await?
-            .map_err(FetchError::Transport)?;
+            .map_err(FetchError::from)?;
         let status = response.status();
         let expected = if piece.range.is_some() {
             StatusCode::PARTIAL_CONTENT
@@ -302,7 +302,7 @@ impl Track<'_> {
         let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
         let write_error = |e| FetchError::Fatal(EngineError::io(&partial, e));
         while let Some(chunk) = or_cancel(&ctx.cancel, body.next()).await? {
-            let chunk = chunk.map_err(FetchError::Transport)?;
+            let chunk = chunk.map_err(FetchError::from)?;
             or_cancel(&ctx.cancel, async {
                 ctx.rate.acquire(chunk.len()).await;
                 shared.global_rate.acquire(chunk.len()).await;

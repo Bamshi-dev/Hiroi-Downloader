@@ -29,6 +29,7 @@ fastrand = "2"
 futures-util = { version = "0.3", features = ["sink"] }
 hex = "0.4"
 httpdate = "1"
+if-addrs = "0.15"
 indicatif = "0.18"
 jiff = "1"
 # Only with the `torrent` feature.

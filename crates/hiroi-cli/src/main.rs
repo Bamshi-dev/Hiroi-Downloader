@@ -26,6 +26,7 @@ async fn main() -> ExitCode {
         Command::Daemon(args) => commands::daemon::run(args, cli.socket).await,
         Command::Browser(command) => commands::browser::run(command),
         Command::NativeHost { .. } => commands::browser::native_host(cli.socket).await,
+        Command::Network(command) => commands::network::run(command),
         command => client_command(command, cli.socket).await,
     };
     result.unwrap_or_else(|error| {
@@ -80,7 +81,8 @@ async fn client_command(
         | Command::Grab(_)
         | Command::Daemon(_)
         | Command::Browser(_)
-        | Command::NativeHost { .. } => {
+        | Command::NativeHost { .. }
+        | Command::Network(_) => {
             unreachable!("handled in main")
         }
     }

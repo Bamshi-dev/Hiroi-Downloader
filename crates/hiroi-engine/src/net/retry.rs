@@ -57,8 +57,19 @@ pub(crate) enum FetchError {
     /// ignored) or a 416: this is no longer the file we started with.
     Changed,
     Protocol(String),
+    /// The network settings forbid this source's address.
+    Refused(String),
     Fatal(EngineError),
     Cancelled,
+}
+
+impl From<reqwest::Error> for FetchError {
+    fn from(error: reqwest::Error) -> Self {
+        match crate::net::guard::refusal(&error) {
+            Some(refusal) => Self::Refused(refusal.0.clone()),
+            None => Self::Transport(error),
+        }
+    }
 }
 
 impl From<EngineError> for FetchError {
@@ -80,6 +91,7 @@ impl fmt::Display for FetchError {
             Self::Slow => f.write_str("connection too slow, reconnecting"),
             Self::Changed => f.write_str("file changed on the server"),
             Self::Protocol(message) => f.write_str(message),
+            Self::Refused(message) => write!(f, "not connecting: {message}"),
             Self::Fatal(error) => write!(f, "{error}"),
             Self::Cancelled => f.write_str("stopped"),
         }
@@ -99,6 +111,7 @@ impl FetchError {
             Self::Slow => EngineError::Protocol("connection too slow".into()),
             Self::Changed => EngineError::RemoteChanged,
             Self::Protocol(message) => EngineError::Protocol(message),
+            Self::Refused(message) => EngineError::Blocked(message),
             Self::Fatal(error) => error,
             Self::Cancelled => EngineError::Cancelled,
         }
@@ -133,7 +146,9 @@ impl RetryPolicy {
     pub(crate) fn action(&self, error: &FetchError, attempt: u32, refreshed: bool) -> RetryAction {
         match error {
             FetchError::Cancelled | FetchError::Fatal(_) => RetryAction::Abort,
-            FetchError::Changed | FetchError::Protocol(_) => RetryAction::DropSource,
+            FetchError::Changed | FetchError::Protocol(_) | FetchError::Refused(_) => {
+                RetryAction::DropSource
+            }
             FetchError::Transport(error) if error.is_redirect() => RetryAction::DropSource,
             FetchError::Transport(_) | FetchError::Connection(_) | FetchError::ClosedEarly => {
                 self.retry_or_drop(attempt, None)

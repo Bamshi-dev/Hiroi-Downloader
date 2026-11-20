@@ -15,6 +15,7 @@ use crate::exposure::{self, ExposureOptions, ExposureReport};
 use crate::inspect::{self, RemoteInfo};
 use crate::limit::{HostLimiter, RateLimiter};
 use crate::listener::DownloadListener;
+use crate::net::guard::{Guard, Network};
 use crate::net::{client, display_url};
 use crate::privacy;
 use crate::request::DownloadRequest;
@@ -63,8 +64,10 @@ impl Engine {
     pub fn new(config: EngineConfig) -> Result<Self> {
         let config = config.normalized();
         privacy::check_config(&config)?;
+        let network = Network::from_config(&config)?;
         let shared = EngineShared {
-            client: client::build_client(&config)?,
+            client: client::build_client(&config, Guard::open(&network))?,
+            network,
             hosts: HostLimiter::new(config.max_connections_per_host),
             connections: Semaphore::new(config.max_total_connections),
             global_rate: RateLimiter::new(config.global_speed_limit),
@@ -198,7 +201,7 @@ impl Engine {
         let shared = &self.inner.shared;
         // The client was already built once in Engine::new with these
         // settings, so building it again cannot fail in practice.
-        let (scoped, client) = task::own_client(&shared.config, request)
+        let (scoped, client) = task::own_client(shared, request)
             .unwrap_or_else(|_| (request.clone(), shared.client.clone()));
         let results = inspect::probe_all(shared, &client, &scoped, &cancel, &|_, _| {}).await;
         inspect::describe(request, &results)
@@ -211,7 +214,8 @@ impl Engine {
         request: &DownloadRequest,
         options: &ExposureOptions,
     ) -> Result<ExposureReport> {
-        exposure::report(&self.inner.shared.config, request, options).await
+        let shared = &self.inner.shared;
+        exposure::report(&shared.config, &shared.network, request, options).await
     }
 
     /// Waits until the download is paused, completed, failed, or cancelled.

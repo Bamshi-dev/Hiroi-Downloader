@@ -19,6 +19,15 @@ pub enum EngineError {
     #[error("invalid proxy: {0}")]
     InvalidProxy(String),
 
+    #[error("invalid setting: {0}")]
+    Config(String),
+
+    /// The network settings forbid the connection: the IP filter, the
+    /// rule against redirects into the local network, or a bound
+    /// interface that is down.
+    #[error("not connecting: {0}")]
+    Blocked(String),
+
     #[error("server answered {status} for {url}")]
     HttpStatus { status: u16, url: String },
 

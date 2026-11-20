@@ -2,32 +2,63 @@ use std::sync::Arc;
 
 use reqwest::header::{ACCEPT, ACCEPT_ENCODING, HeaderMap, HeaderValue};
 use reqwest::redirect::Policy;
-use reqwest::{Client, Proxy, Url};
+use reqwest::{Client, Proxy, RequestBuilder, Url};
 
 use crate::config::EngineConfig;
 use crate::constants::MAX_REDIRECTS;
 use crate::error::{EngineError, Result};
 use crate::net::cookies::DownloadCookies;
+use crate::net::guard::Guard;
+use crate::net::retry::{FetchError, FetchResult};
 use crate::net::tls::{self, Purpose};
 
+/// An HTTP client and the network rules its connections follow.
+#[derive(Debug, Clone)]
+pub(crate) struct Http {
+    client: Client,
+    guard: Arc<Guard>,
+}
+
+impl Http {
+    /// A GET for `url`, unless the guard forbids its address. Host names
+    /// are checked when the client looks them up.
+    pub fn get(&self, url: &Url) -> FetchResult<RequestBuilder> {
+        self.guard
+            .check_url(url)
+            .map_err(|refused| FetchError::Refused(refused.0))?;
+        Ok(self.client.get(url.clone()))
+    }
+}
+
 /// The engine's shared client, for requests that belong to no download.
-pub(crate) fn build_client(config: &EngineConfig) -> Result<Client> {
-    build_client_with(config, download_policy(config), None)
+pub(crate) fn build_client(config: &EngineConfig, guard: Arc<Guard>) -> Result<Http> {
+    let client = build_client_with(config, download_policy(config, &guard), None, &guard)?;
+    Ok(Http { client, guard })
 }
 
 /// A client for one download, with its own cookies. Connections are not
 /// shared with other downloads, which also keeps one site's connection
 /// from carrying another's cookies.
-pub(crate) fn download_client(config: &EngineConfig, cookies: DownloadCookies) -> Result<Client> {
-    build_client_with(config, download_policy(config), Some(Arc::new(cookies)))
+pub(crate) fn download_client(
+    config: &EngineConfig,
+    cookies: DownloadCookies,
+    guard: Arc<Guard>,
+) -> Result<Http> {
+    let policy = download_policy(config, &guard);
+    let client = build_client_with(config, policy, Some(Arc::new(cookies)), &guard)?;
+    Ok(Http { client, guard })
 }
 
-fn download_policy(config: &EngineConfig) -> Policy {
+fn download_policy(config: &EngineConfig, guard: &Arc<Guard>) -> Policy {
     let allow_insecure = config.allow_insecure_redirects;
+    let guard = Arc::clone(guard);
     Policy::custom(move |attempt| {
-        match check_redirect(attempt.previous(), attempt.url(), allow_insecure) {
+        if let Err(reason) = check_redirect(attempt.previous(), attempt.url(), allow_insecure) {
+            return attempt.error(reason);
+        }
+        match guard.check_url(attempt.url()) {
             Ok(()) => attempt.follow(),
-            Err(reason) => attempt.error(reason),
+            Err(refused) => attempt.error(refused),
         }
     })
 }
@@ -38,6 +69,7 @@ pub(crate) fn build_client_with(
     config: &EngineConfig,
     policy: Policy,
     cookies: Option<Arc<DownloadCookies>>,
+    guard: &Arc<Guard>,
 ) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
@@ -45,18 +77,23 @@ pub(crate) fn build_client_with(
     // transfer is not compressed.
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
 
+    let tls = tls::config(Purpose::Http, config.accept_invalid_certificates)?;
     let mut builder = Client::builder()
-        .user_agent(config.user_agent.as_str())
         .default_headers(headers)
         .connect_timeout(config.connect_timeout)
         .read_timeout(config.read_timeout)
         .pool_max_idle_per_host(config.max_connections_per_host)
         .tcp_nodelay(true)
-        .tls_backend_preconfigured(tls::config(Purpose::Http, false)?.as_ref().clone())
+        .tls_backend_preconfigured(tls.as_ref().clone())
         .redirect(policy);
+    // Anonymous mode clears it: no User-Agent at all.
+    if !config.user_agent.is_empty() {
+        builder = builder.user_agent(config.user_agent.as_str());
+    }
     if let Some(cookies) = cookies {
         builder = builder.cookie_provider(cookies);
     }
+    builder = guard.apply(builder);
 
     if let Some(proxy) = &config.proxy {
         let proxy = Proxy::all(proxy)

@@ -21,6 +21,8 @@
 //! - Paths and credentials are checked for line breaks, which would let
 //!   a URL smuggle extra commands into the session.
 
+use std::sync::Arc;
+
 use bytes::{Bytes, BytesMut};
 use futures_util::stream;
 use percent_encoding::percent_decode_str;
@@ -168,7 +170,8 @@ async fn connect(shared: &EngineShared, url: &Url, gate: &HostGate) -> FetchResu
     }
 
     let timeout = shared.config.connect_timeout;
-    let control = route.connect(&host, port, timeout).await?;
+    let guard = shared.network.guard([url]);
+    let control = route.connect(&guard, &host, port, timeout).await?;
     // EPSV names only a port; data connections go to the same host, by
     // name, along the same route. The address suppaftp offers would be
     // the proxy's when there is one.
@@ -179,9 +182,10 @@ async fn connect(shared: &EngineShared, url: &Url, gate: &HostGate) -> FetchResu
             .map_err(|e| reply_error(e, gate))?
             .passive_stream_builder(move |address| {
                 let (route, host) = (route.clone(), data_host.clone());
+                let guard = Arc::clone(&guard);
                 Box::pin(async move {
                     route
-                        .connect(&host, address.port(), timeout)
+                        .connect(&guard, &host, address.port(), timeout)
                         .await
                         .map_err(|e| {
                             FtpError::ConnectionError(std::io::Error::other(e.to_string()))
@@ -191,7 +195,7 @@ async fn connect(shared: &EngineShared, url: &Url, gate: &HostGate) -> FetchResu
         session.set_mode(Mode::ExtendedPassive);
         if secure {
             session = session
-                .into_secure(AsyncRustlsConnector::from(tls()?), &host)
+                .into_secure(AsyncRustlsConnector::from(tls(shared)?), &host)
                 .await
                 .map_err(|e| reply_error(e, gate))?;
         }
@@ -216,9 +220,10 @@ async fn timed<F: Future>(shared: &EngineShared, future: F) -> FetchResult<F::Ou
         .map_err(|_| FetchError::Connection("the FTP server stopped answering".into()))
 }
 
-fn tls() -> FetchResult<tokio_rustls::TlsConnector> {
-    let config =
-        crate::net::tls::config(crate::net::tls::Purpose::Ftp, false).map_err(FetchError::Fatal)?;
+fn tls(shared: &EngineShared) -> FetchResult<tokio_rustls::TlsConnector> {
+    let accept_invalid = shared.config.accept_invalid_certificates;
+    let config = crate::net::tls::config(crate::net::tls::Purpose::Ftp, accept_invalid)
+        .map_err(FetchError::Fatal)?;
     Ok(tokio_rustls::TlsConnector::from(config))
 }
 

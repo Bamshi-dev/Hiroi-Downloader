@@ -141,8 +141,9 @@ async fn connect(shared: &EngineShared, url: &Url) -> FetchResult<Session> {
         ..client::Config::default()
     });
 
+    let guard = shared.network.guard([url]);
     let stream = route
-        .connect(&host, port, shared.config.connect_timeout)
+        .connect(&guard, &host, port, shared.config.connect_timeout)
         .await?;
     let session = async {
         let mut ssh = client::connect_stream(config, stream, check)

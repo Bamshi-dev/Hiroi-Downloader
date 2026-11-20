@@ -57,6 +57,8 @@ pub use error::{EngineError, Result};
 pub use exposure::{ExposureOptions, ExposureReport, Finding, Hop, IpCheck, Level, SourceTrace};
 pub use inspect::{RemoteInfo, SourceInfo};
 pub use listener::DownloadListener;
+pub use net::guard::{InterfaceAddress, interfaces};
+pub use net::ipfilter::IpFilter;
 pub use net::retry::RetryPolicy;
 pub use privacy::ProxyKind;
 pub use request::{ConflictPolicy, DownloadRequest, Priority, Quality, StreamOptions};

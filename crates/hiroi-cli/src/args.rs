@@ -92,6 +92,20 @@ pub enum Command {
     PowerOffWhenDone { state: Switch },
     /// Stop the background service; running jobs continue next time.
     Stop,
+    /// Network interfaces, for binding downloads to a VPN.
+    #[command(subcommand)]
+    Network(NetworkCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NetworkCommand {
+    /// List interfaces and their addresses, with likely VPNs marked.
+    Interfaces,
+    /// Check an IP filter file and count what it blocks.
+    CheckFilter {
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -540,6 +554,34 @@ pub struct EngineArgs {
     /// Faster on slow disks; a power cut can then leave holes in a file.
     #[arg(long)]
     pub no_sync: bool,
+
+    /// Connect only through this network interface, e.g. a VPN's tun0 or
+    /// wg0; downloads stop when it goes down. See `hiroi network interfaces`.
+    #[arg(long, value_name = "NAME")]
+    pub interface: Option<String>,
+
+    /// Connect from this local address.
+    #[arg(long, value_name = "IP")]
+    pub bind_address: Option<std::net::IpAddr>,
+
+    /// Never connect to the addresses in this file (eMule .dat,
+    /// PeerGuardian .p2p, or one CIDR range per line).
+    #[arg(long, value_name = "FILE")]
+    pub ip_filter: Option<PathBuf>,
+
+    /// Let remote sites redirect downloads into the local network
+    /// (localhost, the router, the LAN).
+    #[arg(long)]
+    pub allow_local_redirects: bool,
+
+    /// No Hiroi User-Agent, no Referer, no tracking parameters.
+    #[arg(long)]
+    pub anonymous: bool,
+
+    /// Accept TLS certificates that do not check out (unsafe: anyone on
+    /// the way can read and change the download).
+    #[arg(long)]
+    pub no_check_certificate: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

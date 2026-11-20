@@ -65,6 +65,29 @@ pub struct EngineConfig {
     /// finished file gets its name. Turning this off is faster on slow
     /// disks, but a power cut can then leave a file with holes in it.
     pub sync_to_disk: bool,
+    /// Send every connection through this network interface (`tun0`,
+    /// `wg0`, ...), and fail when it is gone. Bound to a VPN, downloads
+    /// stop when the VPN drops instead of using the normal connection.
+    pub interface: Option<String>,
+    /// Connect from this local address. With `interface`, it must be one
+    /// of the interface's addresses.
+    pub bind_address: Option<std::net::IpAddr>,
+    /// A file of blocked addresses (eMule `.dat`, PeerGuardian `.p2p`,
+    /// or CIDR lines). Nothing in it is ever connected to.
+    pub ip_filter: Option<PathBuf>,
+    /// Let redirects and playlists from remote sites lead to the local
+    /// network (`localhost`, the router, the LAN). Off by default: a web
+    /// page could otherwise make Hiroi fetch from machines behind the
+    /// user's firewall.
+    pub allow_local_redirects: bool,
+    /// Look like any other client: no Hiroi User-Agent, no Referer, and
+    /// tracking parameters removed. A User-Agent set on purpose (in the
+    /// config or by a browser) is still sent.
+    pub anonymous: bool,
+    /// Accept TLS certificates that do not check out. Anyone on the
+    /// network can then read and change the downloads; only for servers
+    /// the user controls and cannot fix.
+    pub accept_invalid_certificates: bool,
 }
 
 impl Default for EngineConfig {
@@ -96,6 +119,12 @@ impl Default for EngineConfig {
             no_referer: false,
             cookie_jar: true,
             sync_to_disk: true,
+            interface: None,
+            bind_address: None,
+            ip_filter: None,
+            allow_local_redirects: false,
+            anonymous: false,
+            accept_invalid_certificates: false,
         }
     }
 }
@@ -113,6 +142,14 @@ impl EngineConfig {
         self.global_speed_limit = self.global_speed_limit.filter(|&limit| limit > 0);
         self.min_connection_speed = self.min_connection_speed.filter(|&speed| speed > 0);
         self.slow_connection_window = self.slow_connection_window.max(Duration::from_millis(500));
+        self.interface = self.interface.filter(|name| !name.trim().is_empty());
+        if self.anonymous {
+            self.no_referer = true;
+            self.strip_tracking = true;
+            if self.user_agent == constants::DEFAULT_USER_AGENT {
+                self.user_agent.clear();
+            }
+        }
         self
     }
 }

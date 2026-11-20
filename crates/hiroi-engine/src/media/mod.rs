@@ -494,13 +494,10 @@ async fn fetch_small_once(
     use futures_util::StreamExt;
     let gate = ctx.shared.hosts.gate(&crate::net::host_key(url));
     let _host = or_cancel(&ctx.cancel, gate.acquire()).await?;
-    let request = ctx
-        .client
-        .get(url.clone())
-        .headers(ctx.request.headers.clone());
+    let request = ctx.client.get(url)?.headers(ctx.request.headers.clone());
     let response = or_cancel(&ctx.cancel, request.send())
         .await?
-        .map_err(FetchError::Transport)?;
+        .map_err(FetchError::from)?;
     let status = response.status();
     if !status.is_success() {
         let retry_after = crate::net::probe::retry_after(&response);
@@ -515,7 +512,7 @@ async fn fetch_small_once(
     let mut body = response.bytes_stream();
     let mut data = Vec::new();
     while let Some(chunk) = or_cancel(&ctx.cancel, body.next()).await? {
-        data.extend_from_slice(&chunk.map_err(FetchError::Transport)?);
+        data.extend_from_slice(&chunk.map_err(FetchError::from)?);
         if data.len() > limit {
             return Err(FetchError::Protocol(format!(
                 "{} is larger than {limit} bytes",

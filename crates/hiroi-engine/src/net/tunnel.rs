@@ -14,6 +14,7 @@ use tokio_socks::tcp::Socks5Stream;
 
 use crate::config::EngineConfig;
 use crate::error::EngineError;
+use crate::net::guard::{Guard, refusal};
 use crate::net::retry::{FetchError, FetchResult};
 use crate::privacy::ProxyKind;
 
@@ -69,16 +70,20 @@ impl Route {
         })
     }
 
-    /// Connects to `host:port` within `timeout`.
+    /// Connects to `host:port` within `timeout`, by `guard`'s rules.
     pub async fn connect(
         &self,
+        guard: &Guard,
         host: &str,
         port: u16,
         timeout: Duration,
     ) -> FetchResult<TcpStream> {
         let attempt = async {
             match self {
-                Self::Direct => TcpStream::connect((host, port)).await,
+                Self::Direct => {
+                    let found = guard.lookup(host, port).await?;
+                    guard.connect(&found, timeout).await
+                }
                 Self::Socks5 {
                     proxy,
                     login,
@@ -88,23 +93,23 @@ impl Route {
                         TargetAddr::Domain(host.into(), port)
                     } else {
                         // socks5:// means the name is looked up here.
-                        let address = tokio::net::lookup_host((host, port))
-                            .await?
-                            .next()
-                            .ok_or_else(|| std::io::Error::other("the server has no address"))?;
-                        TargetAddr::Ip(address)
+                        let found = guard.lookup(host, port).await?;
+                        TargetAddr::Ip(found[0])
                     };
+                    // The proxy is the user's choice: bound like any
+                    // connection, but not filtered.
+                    let at = tokio::net::lookup_host(proxy.as_str())
+                        .await?
+                        .collect::<Vec<_>>();
+                    let socket = guard.connect(&at, timeout).await?;
                     let stream = match login {
                         Some((user, password)) => {
-                            Socks5Stream::connect_with_password(
-                                proxy.as_str(),
-                                target,
-                                user,
-                                password,
+                            Socks5Stream::connect_with_password_and_socket(
+                                socket, target, user, password,
                             )
                             .await
                         }
-                        None => Socks5Stream::connect(proxy.as_str(), target).await,
+                        None => Socks5Stream::connect_with_socket(socket, target).await,
                     };
                     stream
                         .map(Socks5Stream::into_inner)
@@ -117,7 +122,10 @@ impl Route {
                 let _ = stream.set_nodelay(true);
                 Ok(stream)
             }
-            Ok(Err(error)) => Err(FetchError::Connection(error.to_string())),
+            Ok(Err(error)) => match refusal(&error) {
+                Some(refused) => Err(FetchError::Refused(refused.0.clone())),
+                None => Err(FetchError::Connection(error.to_string())),
+            },
             Err(_) => Err(FetchError::Connection("connecting took too long".into())),
         }
     }

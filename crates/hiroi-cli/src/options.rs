@@ -21,6 +21,12 @@ pub fn engine_config(engine: &EngineArgs) -> EngineConfig {
         no_referer: engine.no_referer,
         cookie_jar: !engine.no_cookie_jar,
         sync_to_disk: !engine.no_sync,
+        interface: engine.interface.clone(),
+        bind_address: engine.bind_address,
+        ip_filter: engine.ip_filter.clone(),
+        allow_local_redirects: engine.allow_local_redirects,
+        anonymous: engine.anonymous,
+        accept_invalid_certificates: engine.no_check_certificate,
         ..EngineConfig::default()
     }
 }
