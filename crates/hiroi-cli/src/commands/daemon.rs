@@ -24,8 +24,12 @@ pub async fn run(args: DaemonArgs, socket: Option<std::path::PathBuf>) -> Result
     if let Some(dir) = args.dir {
         config.download_dir = std::path::absolute(dir)?;
     }
-    eprintln!("Hiroi service listening on {}", config.socket.display());
-    hiroi_daemon::run(config, shutdown_signal()).await?;
+    // Printed once the socket accepts connections, so a script that
+    // waits for this line can talk to the service right away.
+    let ready = |socket: &std::path::Path| {
+        eprintln!("Hiroi service listening on {}", socket.display());
+    };
+    hiroi_daemon::run(config, ready, shutdown_signal()).await?;
     eprintln!("Hiroi service stopped; downloads were saved.");
     Ok(ExitCode::SUCCESS)
 }

@@ -53,7 +53,7 @@ impl Fixture {
     async fn start(&self) -> (JoinHandle<Result<(), DaemonError>>, Client) {
         let config = self.config();
         let socket = config.socket.clone();
-        let service = tokio::spawn(run(config, std::future::pending()));
+        let service = tokio::spawn(run(config, |_| {}, std::future::pending()));
         for _ in 0..200 {
             if let Ok(client) = Client::connect(&socket).await {
                 return (service, client);
@@ -216,7 +216,7 @@ async fn secrets_never_reach_the_database() {
 async fn only_one_service_runs_at_a_time() {
     let fixture = Fixture::new();
     let (_service, _client) = fixture.start().await;
-    let second = run(fixture.config(), std::future::pending()).await;
+    let second = run(fixture.config(), |_| {}, std::future::pending()).await;
     assert!(
         matches!(second, Err(DaemonError::AlreadyRunning(_))),
         "{second:?}"

@@ -79,9 +79,11 @@ pub enum DaemonError {
 }
 
 /// Runs the service until `shutdown` resolves or a client asks it to
-/// stop. Every download is paused and saved before this returns.
+/// stop. `ready` is called once clients can connect. Every download is
+/// paused and saved before this returns.
 pub async fn run(
     config: DaemonConfig,
+    ready: impl FnOnce(&std::path::Path),
     shutdown: impl Future<Output = ()>,
 ) -> Result<(), DaemonError> {
     let runtime = config
@@ -107,6 +109,7 @@ pub async fn run(
     .await?;
     let listener = server::bind(&config.socket)?;
     tracing::info!(socket = %config.socket.display(), "service ready");
+    ready(&config.socket);
 
     let stop = CancellationToken::new();
     tokio::select! {
