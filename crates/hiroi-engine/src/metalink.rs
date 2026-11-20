@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use reqwest::Url;
 
-use crate::checksum::Checksum;
+use crate::checksum::{Checksum, HashAlgorithm, PieceHashes};
 use crate::error::{EngineError, Result};
 use crate::net::probe::RemoteFile;
 use crate::storage::naming::sanitize_file_name;
@@ -31,6 +31,7 @@ pub(crate) struct MetaFile {
     pub path: Vec<String>,
     pub size: Option<u64>,
     pub checksum: Option<Checksum>,
+    pub pieces: Option<PieceHashes>,
     /// Best first.
     pub urls: Vec<Url>,
 }
@@ -64,6 +65,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<MetaFile>> {
         };
         let size = file.child("size").and_then(|s| s.text.trim().parse().ok());
         let checksum = strongest_hash(file);
+        let pieces = strongest_pieces(file);
         let urls = urls(file);
         if urls.is_empty() {
             tracing::warn!(name = %path.join("/"), "skipping a Metalink file without sources we can use");
@@ -73,6 +75,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<MetaFile>> {
             path,
             size,
             checksum,
+            pieces,
             urls,
         });
     }
@@ -113,6 +116,50 @@ fn strongest_hash(file: &Element) -> Option<Checksum> {
                 format!("{wanted}:{}", hash.text.trim()).parse().ok()
             })
         })
+}
+
+/// The piece hashes with the strongest algorithm. Version 4 puts
+/// `<pieces>` in the file, version 3 inside `<verification>`; both list
+/// one `<hash>` per piece.
+fn strongest_pieces(file: &Element) -> Option<PieceHashes> {
+    let lists = file.children("pieces").chain(
+        file.child("verification")
+            .into_iter()
+            .flat_map(|v| v.children("pieces")),
+    );
+    lists
+        .filter_map(|list| {
+            let algorithm = HashAlgorithm::from_name(list.attr("type")?)?;
+            let length = list.attr("length")?.trim().parse().ok()?;
+            let mut hashes: Vec<(usize, String)> = list
+                .children("hash")
+                .enumerate()
+                .map(|(order, hash)| {
+                    let index = hash
+                        .attr("piece")
+                        .and_then(|p| p.parse().ok())
+                        .unwrap_or(order);
+                    (index, hash.text.trim().to_ascii_lowercase())
+                })
+                .collect();
+            hashes.sort_by_key(|(index, _)| *index);
+            let hashes = hashes.into_iter().map(|(_, hash)| hash).collect();
+            Some(PieceHashes {
+                algorithm,
+                length,
+                hashes,
+            })
+        })
+        .max_by_key(|pieces| strength(pieces.algorithm))
+}
+
+fn strength(algorithm: HashAlgorithm) -> u8 {
+    match algorithm {
+        HashAlgorithm::Md5 => 0,
+        HashAlgorithm::Sha1 => 1,
+        HashAlgorithm::Sha256 => 2,
+        HashAlgorithm::Sha512 => 3,
+    }
 }
 
 /// Sources this build can use, best first. Version 4 ranks by `priority`
@@ -173,6 +220,7 @@ pub(crate) async fn download(ctx: &Arc<TaskContext>, url: &Url) -> Result<PathBu
             request.checksum = file.checksum.clone();
         }
         request.sources = file.urls;
+        request.pieces = file.pieces.map(Arc::new);
         let path = Box::pin(task::run(Arc::new(ctx.derive(request)))).await?;
         first.get_or_insert(path);
     }
@@ -241,6 +289,28 @@ mod tests {
         assert_eq!(files[0].urls[0].host_str(), Some("b.example"));
         assert_eq!(files[1].path, ["docs", "guide.pdf"]);
         assert!(files[1].checksum.is_some());
+    }
+
+    #[test]
+    fn piece_hashes_of_both_versions() {
+        let v4 = r#"<metalink><file name="a"><url>https://a.example/a</url>
+            <pieces length="1024" type="sha-1"><hash>AA</hash><hash>bb</hash></pieces>
+            <pieces length="2048" type="sha-256"><hash>cc</hash></pieces></file></metalink>"#;
+        let pieces = parse(v4).unwrap()[0].pieces.clone().unwrap();
+        assert_eq!(
+            (pieces.length, pieces.hashes.as_slice()),
+            (2048, ["cc".to_string()].as_slice())
+        );
+
+        let v3 = r#"<metalink version="3.0"><files><file name="b"><verification>
+            <pieces length="512" type="sha1"><hash piece="1">22</hash><hash piece="0">11</hash></pieces>
+            </verification><resources><url type="http">http://a.example/b</url></resources></file></files></metalink>"#;
+        let pieces = parse(v3).unwrap()[0].pieces.clone().unwrap();
+        assert_eq!(
+            pieces.hashes,
+            ["11", "22"],
+            "ordered by the piece attribute"
+        );
     }
 
     #[test]

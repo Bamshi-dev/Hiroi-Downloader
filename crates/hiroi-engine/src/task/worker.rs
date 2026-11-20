@@ -106,18 +106,19 @@ async fn fetch(
         protocol::open(shared, &transfer.ctx.client, source, headers, &gate, want),
     )
     .await??;
-    receive(transfer, segment, body, slot).await
+    receive(transfer, segment, source, body, slot).await
 }
 
 async fn receive(
     transfer: &Transfer,
     segment: &Segment,
+    source: &Source,
     mut body: Body,
     slot: usize,
 ) -> FetchResult<()> {
     let ctx = &transfer.ctx;
     let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
-    let mut writer = Writer::new(transfer, segment);
+    let mut writer = Writer::new(transfer, segment, source);
     let mut speed = SpeedCheck::new(transfer, slot);
 
     let outcome = loop {
@@ -168,16 +169,25 @@ async fn receive(
 struct Writer<'a> {
     transfer: &'a Transfer,
     segment: &'a Segment,
+    source: &'a Source,
     /// Where the next buffer goes: after everything written or in flight.
     offset: u64,
-    pending: Option<(usize, tokio::task::JoinHandle<std::io::Result<Vec<u8>>>)>,
+    pending: Option<Pending>,
+}
+
+/// The write in flight: where it goes, how long it is, and its handle.
+struct Pending {
+    offset: u64,
+    len: usize,
+    write: tokio::task::JoinHandle<std::io::Result<Vec<u8>>>,
 }
 
 impl<'a> Writer<'a> {
-    fn new(transfer: &'a Transfer, segment: &'a Segment) -> Self {
+    fn new(transfer: &'a Transfer, segment: &'a Segment, source: &'a Source) -> Self {
         Self {
             transfer,
             segment,
+            source,
             offset: segment.write_offset(),
             pending: None,
         }
@@ -191,14 +201,18 @@ impl<'a> Writer<'a> {
         }
         let len = buffer.len();
         let write = self.transfer.file.start_write(buffer, self.offset);
+        self.pending = Some(Pending {
+            offset: self.offset,
+            len,
+            write,
+        });
         self.offset += len as u64;
-        self.pending = Some((len, write));
         Ok(spare.unwrap_or_else(|| Vec::with_capacity(WRITE_BUFFER_SIZE)))
     }
 
     /// Waits for the write in flight, if any, and returns its buffer.
     async fn finish(&mut self) -> FetchResult<Option<Vec<u8>>> {
-        let Some((len, write)) = self.pending.take() else {
+        let Some(Pending { offset, len, write }) = self.pending.take() else {
             return Ok(None);
         };
         let path = self.transfer.file.path();
@@ -207,6 +221,9 @@ impl<'a> Writer<'a> {
             .map_err(|e| EngineError::io(path, std::io::Error::other(e)))?
             .map_err(|e| EngineError::io(path, e))?;
         self.segment.commit(len);
+        self.transfer
+            .provenance
+            .record(offset, offset + len as u64, self.source.original());
         buffer.clear();
         Ok(Some(buffer))
     }

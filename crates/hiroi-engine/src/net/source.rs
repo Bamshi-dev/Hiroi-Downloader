@@ -146,6 +146,18 @@ impl SourcePool {
         *self.last_failure.lock() = Some(failure);
     }
 
+    /// The source whose original URL is `url`.
+    pub fn find(&self, url: &Url) -> Option<&Arc<Source>> {
+        self.sources.iter().find(|source| source.original() == url)
+    }
+
+    pub fn live(&self) -> usize {
+        self.sources
+            .iter()
+            .filter(|source| !source.is_dead())
+            .count()
+    }
+
     /// The error to report once no source is left.
     pub fn exhausted(&self) -> EngineError {
         match &*self.last_failure.lock() {

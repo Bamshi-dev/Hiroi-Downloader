@@ -15,6 +15,7 @@ use crate::net::source::SourcePool;
 use crate::storage::control::ControlFile;
 use crate::storage::file::OutputFile;
 use crate::storage::plan::Plan;
+use reqwest::Url;
 
 /// Everything the connections of one download share.
 #[derive(Debug)]
@@ -34,6 +35,55 @@ pub(super) struct Transfer {
     /// Child of the task's token: also cancelled when one connection fails
     /// for good, so the others stop too.
     pub cancel: CancellationToken,
+    /// Which source wrote which bytes in this run.
+    pub provenance: Provenance,
+}
+
+/// Byte ranges and the source that wrote them, so a source that sent
+/// broken pieces can be found. Neighbouring ranges from the same source
+/// are merged, which keeps this to a few entries per connection.
+#[derive(Debug, Default)]
+pub(crate) struct Provenance(parking_lot::Mutex<Vec<(u64, u64, Url)>>);
+
+impl Provenance {
+    pub fn record(&self, start: u64, end: u64, source: &Url) {
+        let mut ranges = self.0.lock();
+        if let Some(last) = ranges
+            .iter_mut()
+            .rev()
+            .find(|(_, last_end, url)| *last_end == start && url == source)
+        {
+            last.1 = end;
+            return;
+        }
+        ranges.push((start, end, source.clone()));
+    }
+
+    fn take(&self) -> Self {
+        Self(parking_lot::Mutex::new(std::mem::take(&mut *self.0.lock())))
+    }
+
+    /// The sources that wrote any byte of `ranges`, with how many of the
+    /// ranges each one touched.
+    pub fn blame(&self, ranges: &[(u64, u64)]) -> Vec<(Url, usize)> {
+        let mut counts: Vec<(Url, usize)> = Vec::new();
+        for &(start, end) in ranges {
+            let mut touched: Vec<&Url> = Vec::new();
+            let recorded = self.0.lock();
+            for (from, to, url) in recorded.iter() {
+                if *from < end && start < *to && !touched.contains(&url) {
+                    touched.push(url);
+                }
+            }
+            for url in touched {
+                match counts.iter_mut().find(|(known, _)| known == url) {
+                    Some(entry) => entry.1 += 1,
+                    None => counts.push((url.clone(), 1)),
+                }
+            }
+        }
+        counts
+    }
 }
 
 pub(super) async fn download(
@@ -41,7 +91,7 @@ pub(super) async fn download(
     pool: Arc<SourcePool>,
     total_size: u64,
     plan: &Plan,
-) -> Result<()> {
+) -> Result<Provenance> {
     let config = &ctx.shared.config;
     let connections = ctx
         .request
@@ -70,6 +120,7 @@ pub(super) async fn download(
         rates: (0..connections).map(|_| AtomicU64::new(0)).collect(),
         reference_rate: AtomicU64::new(0),
         cancel: ctx.cancel.child_token(),
+        provenance: Provenance::default(),
     });
     // Save the starting layout right away, so even an early crash resumes.
     checkpoint(&transfer, &control, plan).await?;
@@ -88,7 +139,7 @@ pub(super) async fn download(
             "transfer ended with missing data".into(),
         ));
     }
-    Ok(())
+    Ok(transfer.provenance.take())
 }
 
 /// Waits for the connections while reporting progress and saving

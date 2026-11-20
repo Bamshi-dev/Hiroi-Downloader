@@ -17,6 +17,17 @@ pub enum HashAlgorithm {
 }
 
 impl HashAlgorithm {
+    /// `sha-256`, `SHA256`, `md5`, and so on.
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().replace('-', "").as_str() {
+            "md5" => Some(Self::Md5),
+            "sha1" => Some(Self::Sha1),
+            "sha256" => Some(Self::Sha256),
+            "sha512" => Some(Self::Sha512),
+            _ => None,
+        }
+    }
+
     fn hex_len(self) -> usize {
         match self {
             Self::Md5 => 32,
@@ -76,13 +87,7 @@ impl FromStr for Checksum {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let invalid = || EngineError::InvalidChecksum(value.to_string());
         let (name, hex) = value.split_once([':', '=']).ok_or_else(invalid)?;
-        let algorithm = match name.trim().to_ascii_lowercase().replace('-', "").as_str() {
-            "md5" => HashAlgorithm::Md5,
-            "sha1" => HashAlgorithm::Sha1,
-            "sha256" => HashAlgorithm::Sha256,
-            "sha512" => HashAlgorithm::Sha512,
-            _ => return Err(invalid()),
-        };
+        let algorithm = HashAlgorithm::from_name(name).ok_or_else(invalid)?;
         let expected = hex.trim().to_ascii_lowercase();
         let is_hex = expected.bytes().all(|b| b.is_ascii_hexdigit());
         if expected.len() != algorithm.hex_len() || !is_hex {
@@ -101,6 +106,71 @@ impl fmt::Display for Checksum {
     }
 }
 
+/// A hash for every piece of a file, as Metalink files give them. With
+/// these, a broken download does not have to start over: only the
+/// pieces that fail are fetched again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PieceHashes {
+    pub algorithm: HashAlgorithm,
+    /// Bytes per piece; the last piece may be shorter.
+    pub length: u64,
+    /// Lowercase hex, in file order.
+    pub hashes: Vec<String>,
+}
+
+impl PieceHashes {
+    /// Whether the list fits a file of `size` bytes.
+    pub fn fits(&self, size: u64) -> bool {
+        self.length > 0
+            && self.hashes.len() as u64 == size.div_ceil(self.length)
+            && self
+                .hashes
+                .iter()
+                .all(|hash| hash.len() == self.algorithm.hex_len())
+    }
+
+    /// Byte ranges of the pieces of `path` whose hash is wrong, merged
+    /// where they touch. Blocking: call from a blocking thread.
+    pub fn broken(&self, path: &Path) -> io::Result<Vec<(u64, u64)>> {
+        let mut file = File::open(path)?;
+        let mut buffer = vec![
+            0;
+            usize::try_from(self.length)
+                .unwrap_or(usize::MAX)
+                .min(1 << 24)
+        ];
+        let mut broken: Vec<(u64, u64)> = Vec::new();
+        for (index, expected) in self.hashes.iter().enumerate() {
+            let start = index as u64 * self.length;
+            let actual = hash_piece(&mut file, self.algorithm, self.length, &mut buffer)?;
+            if actual != *expected {
+                let end = start + self.length;
+                match broken.last_mut() {
+                    Some(last) if last.1 == start => last.1 = end,
+                    _ => broken.push((start, end)),
+                }
+            }
+        }
+        Ok(broken)
+    }
+}
+
+/// Hashes the next `length` bytes of `file` (fewer at its end).
+fn hash_piece(
+    file: &mut File,
+    algorithm: HashAlgorithm,
+    length: u64,
+    buffer: &mut [u8],
+) -> io::Result<String> {
+    let piece = Read::take(&mut *file, length);
+    match algorithm {
+        HashAlgorithm::Md5 => hash_reader_with::<md5::Md5>(piece, buffer),
+        HashAlgorithm::Sha1 => hash_reader_with::<sha1::Sha1>(piece, buffer),
+        HashAlgorithm::Sha256 => hash_reader_with::<sha2::Sha256>(piece, buffer),
+        HashAlgorithm::Sha512 => hash_reader_with::<sha2::Sha512>(piece, buffer),
+    }
+}
+
 fn hash_file(path: &Path, algorithm: HashAlgorithm) -> io::Result<String> {
     let file = File::open(path)?;
     match algorithm {
@@ -111,11 +181,14 @@ fn hash_file(path: &Path, algorithm: HashAlgorithm) -> io::Result<String> {
     }
 }
 
-fn hash_reader<D: Digest>(mut reader: impl Read) -> io::Result<String> {
+fn hash_reader<D: Digest>(reader: impl Read) -> io::Result<String> {
+    hash_reader_with::<D>(reader, &mut vec![0; 1024 * 1024])
+}
+
+fn hash_reader_with<D: Digest>(mut reader: impl Read, buffer: &mut [u8]) -> io::Result<String> {
     let mut hasher = D::new();
-    let mut buffer = vec![0; 1024 * 1024];
     loop {
-        let read = reader.read(&mut buffer)?;
+        let read = reader.read(buffer)?;
         if read == 0 {
             break;
         }
@@ -127,6 +200,32 @@ fn hash_reader<D: Digest>(mut reader: impl Read) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn broken_pieces_are_found_and_merged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f");
+        let good: Vec<u8> = (0..10_000u32).map(|i| i as u8).collect();
+        let hashes = good
+            .chunks(1000)
+            .map(|piece| hex::encode(sha2::Sha256::digest(piece)))
+            .collect();
+        let pieces = PieceHashes {
+            algorithm: HashAlgorithm::Sha256,
+            length: 1000,
+            hashes,
+        };
+        assert!(pieces.fits(10_000) && !pieces.fits(9_000));
+
+        let mut bad = good.clone();
+        for at in [1500, 2500, 7000] {
+            bad[at] ^= 1;
+        }
+        std::fs::write(&path, &bad).unwrap();
+        assert_eq!(pieces.broken(&path).unwrap(), [(1000, 3000), (7000, 8000)]);
+        std::fs::write(&path, &good).unwrap();
+        assert!(pieces.broken(&path).unwrap().is_empty());
+    }
 
     #[test]
     fn parses_both_separators_and_any_case() {

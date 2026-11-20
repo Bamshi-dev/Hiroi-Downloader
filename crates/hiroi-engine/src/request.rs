@@ -105,6 +105,8 @@ pub struct DownloadRequest {
     /// starts; the client sends it to its site only. Kept for yt-dlp,
     /// which reads the page itself.
     pub(crate) own_cookies: Option<String>,
+    /// Hashes of every piece, from a Metalink file.
+    pub(crate) pieces: Option<std::sync::Arc<crate::checksum::PieceHashes>>,
 }
 
 impl DownloadRequest {
@@ -122,6 +124,7 @@ impl DownloadRequest {
             stream: StreamOptions::default(),
             derived: false,
             own_cookies: None,
+            pieces: None,
         })
     }
 

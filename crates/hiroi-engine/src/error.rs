@@ -51,6 +51,9 @@ pub enum EngineError {
     #[error("checksum mismatch: expected {expected}, got {actual}")]
     ChecksumMismatch { expected: String, actual: String },
 
+    #[error("{bytes} bytes still fail their piece hashes after fetching them again")]
+    BrokenPieces { bytes: u64 },
+
     #[error("I/O error on `{}`: {source}", path.display())]
     Io {
         path: PathBuf,
