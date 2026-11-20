@@ -20,6 +20,7 @@ pub fn engine_config(engine: &EngineArgs) -> EngineConfig {
         strip_tracking: engine.strip_tracking,
         no_referer: engine.no_referer,
         cookie_jar: !engine.no_cookie_jar,
+        sync_to_disk: !engine.no_sync,
         ..EngineConfig::default()
     }
 }

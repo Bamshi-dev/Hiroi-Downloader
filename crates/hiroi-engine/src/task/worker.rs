@@ -10,7 +10,7 @@ use super::or_cancel;
 use super::segmented::Transfer;
 use super::segments::Segment;
 use crate::constants::{SLOW_CONNECTION_RATIO, WRITE_BUFFER_SIZE};
-use crate::error::Result;
+use crate::error::{EngineError, Result};
 use crate::net::protocol::{self, Body, Want};
 use crate::net::retry::{FetchError, FetchResult, RetryAction};
 use crate::net::source::Source;
@@ -117,6 +117,7 @@ async fn receive(
 ) -> FetchResult<()> {
     let ctx = &transfer.ctx;
     let mut buffer = Vec::with_capacity(WRITE_BUFFER_SIZE);
+    let mut writer = Writer::new(transfer, segment);
     let mut speed = SpeedCheck::new(transfer, slot);
 
     let outcome = loop {
@@ -143,7 +144,7 @@ async fn receive(
         let accepted = segment.reserve(chunk.len());
         buffer.extend_from_slice(&chunk[..accepted]);
         if buffer.len() >= WRITE_BUFFER_SIZE {
-            buffer = flush(transfer, segment, buffer).await?;
+            buffer = writer.write(buffer).await?;
         }
         // Done, or another connection took over the rest of this segment.
         if segment.fully_reserved() {
@@ -156,22 +157,59 @@ async fn receive(
     };
 
     // Bytes that arrived before a failure are still good: keep them.
-    flush(transfer, segment, buffer).await?;
+    writer.write(buffer).await?;
+    writer.finish().await?;
     outcome
 }
 
-async fn flush(transfer: &Transfer, segment: &Segment, buffer: Vec<u8>) -> FetchResult<Vec<u8>> {
-    if buffer.is_empty() {
-        return Ok(buffer);
+/// Writes one buffer while the connection fills the next, so the
+/// network is not idle while the disk works. At most one write is in
+/// flight, and bytes count as written only once the write returned.
+struct Writer<'a> {
+    transfer: &'a Transfer,
+    segment: &'a Segment,
+    /// Where the next buffer goes: after everything written or in flight.
+    offset: u64,
+    pending: Option<(usize, tokio::task::JoinHandle<std::io::Result<Vec<u8>>>)>,
+}
+
+impl<'a> Writer<'a> {
+    fn new(transfer: &'a Transfer, segment: &'a Segment) -> Self {
+        Self {
+            transfer,
+            segment,
+            offset: segment.write_offset(),
+            pending: None,
+        }
     }
-    let len = buffer.len();
-    let mut buffer = transfer
-        .file
-        .write_at(buffer, segment.write_offset())
-        .await?;
-    segment.commit(len);
-    buffer.clear();
-    Ok(buffer)
+
+    /// Starts writing `buffer` and hands back an empty one to fill.
+    async fn write(&mut self, buffer: Vec<u8>) -> FetchResult<Vec<u8>> {
+        let spare = self.finish().await?;
+        if buffer.is_empty() {
+            return Ok(buffer);
+        }
+        let len = buffer.len();
+        let write = self.transfer.file.start_write(buffer, self.offset);
+        self.offset += len as u64;
+        self.pending = Some((len, write));
+        Ok(spare.unwrap_or_else(|| Vec::with_capacity(WRITE_BUFFER_SIZE)))
+    }
+
+    /// Waits for the write in flight, if any, and returns its buffer.
+    async fn finish(&mut self) -> FetchResult<Option<Vec<u8>>> {
+        let Some((len, write)) = self.pending.take() else {
+            return Ok(None);
+        };
+        let path = self.transfer.file.path();
+        let mut buffer = write
+            .await
+            .map_err(|e| EngineError::io(path, std::io::Error::other(e)))?
+            .map_err(|e| EngineError::io(path, e))?;
+        self.segment.commit(len);
+        buffer.clear();
+        Ok(Some(buffer))
+    }
 }
 
 /// Resolves the original link again, e.g. after a signed URL expired.

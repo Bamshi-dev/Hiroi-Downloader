@@ -63,6 +63,21 @@ impl OutputFile {
 
     /// Writes `buffer` at `offset` on a blocking thread and hands the buffer
     /// back for reuse.
+    /// Starts writing `buffer` at `offset` on a blocking thread, and hands
+    /// back the handle of the write, which returns the buffer.
+    pub fn start_write(
+        &self,
+        buffer: Vec<u8>,
+        offset: u64,
+    ) -> tokio::task::JoinHandle<io::Result<Vec<u8>>> {
+        let file = Arc::clone(&self.file);
+        tokio::task::spawn_blocking(move || write_all_at(&file, &buffer, offset).map(|()| buffer))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub async fn write_at(&self, buffer: Vec<u8>, offset: u64) -> Result<Vec<u8>> {
         let file = Arc::clone(&self.file);
         let written = tokio::task::spawn_blocking(move || {

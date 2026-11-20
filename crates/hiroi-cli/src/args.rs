@@ -535,6 +535,11 @@ pub struct EngineArgs {
     /// set a session cookie first and fail without it.
     #[arg(long)]
     pub no_cookie_jar: bool,
+
+    /// Do not flush downloads to disk before calling them saved or done.
+    /// Faster on slow disks; a power cut can then leave holes in a file.
+    #[arg(long)]
+    pub no_sync: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

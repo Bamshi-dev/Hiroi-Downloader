@@ -61,6 +61,10 @@ pub struct EngineConfig {
     /// that download only. Some download pages set a session cookie and
     /// then redirect to the file, which fails without it.
     pub cookie_jar: bool,
+    /// Flush data to disk before recording it as saved, and before a
+    /// finished file gets its name. Turning this off is faster on slow
+    /// disks, but a power cut can then leave a file with holes in it.
+    pub sync_to_disk: bool,
 }
 
 impl Default for EngineConfig {
@@ -91,6 +95,7 @@ impl Default for EngineConfig {
             strip_tracking: false,
             no_referer: false,
             cookie_jar: true,
+            sync_to_disk: true,
         }
     }
 }

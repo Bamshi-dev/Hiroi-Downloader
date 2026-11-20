@@ -32,7 +32,8 @@ pub(super) async fn download(
             file.reserve(size, ctx.shared.config.preallocate)?;
         }
         let error = match fetch(ctx, source, &file, size).await {
-            Ok(()) => return file.sync().await,
+            Ok(()) if ctx.shared.config.sync_to_disk => return file.sync().await,
+            Ok(()) => return Ok(()),
             Err(error) => error,
         };
         drop(file);

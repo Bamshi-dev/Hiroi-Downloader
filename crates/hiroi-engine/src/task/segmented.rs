@@ -139,7 +139,9 @@ async fn supervise(
 
 /// Flushes data to disk first, then records it in the control file.
 async fn checkpoint(transfer: &Transfer, control: &ControlFile, plan: &Plan) -> Result<()> {
-    transfer.file.sync().await?;
+    if transfer.ctx.shared.config.sync_to_disk {
+        transfer.file.sync().await?;
+    }
     let mut control = control.clone();
     control.segments = transfer.table.saved();
     let path = &plan.paths.control_path;
