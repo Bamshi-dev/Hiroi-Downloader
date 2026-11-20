@@ -74,7 +74,7 @@ pub async fn run(
                 Ok(request)
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut config = options::engine_config(&args.engine);
+        let mut config = options::engine_config(&args.engine)?;
         config.max_active_downloads = args.jobs;
         get::download(config, requests, verbose, false).await
     }

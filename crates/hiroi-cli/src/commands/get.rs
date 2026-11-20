@@ -24,7 +24,7 @@ pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
         bail!("--output, --mirror, and --checksum only work with a single URL");
     }
 
-    let mut config = options::engine_config(&args.engine);
+    let mut config = options::engine_config(&args.engine)?;
     config.max_active_downloads = args.jobs;
     config.global_speed_limit = args.global_limit;
     let requests = urls

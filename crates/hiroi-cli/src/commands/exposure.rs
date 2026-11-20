@@ -10,7 +10,7 @@ use crate::args::ExposureArgs;
 use crate::options;
 
 pub async fn run(args: ExposureArgs) -> Result<ExitCode> {
-    let engine = Engine::new(options::engine_config(&args.engine))?;
+    let engine = Engine::new(options::engine_config(&args.engine)?)?;
     let request = options::base_request(&args.url, &args.mirrors, &args.request)?;
     let check = ExposureOptions {
         check_ip: args.check_ip,

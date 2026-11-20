@@ -1,4 +1,5 @@
-//! Where the service keeps its socket, lock, and database.
+//! Where the service keeps its socket, lock, and database, and where
+//! the settings file lives.
 //!
 //! The runtime directory (socket and lock) follows the XDG base
 //! directory specification: `$XDG_RUNTIME_DIR/hiroi`, which the system
@@ -31,6 +32,15 @@ pub fn default_socket() -> PathBuf {
 pub fn data_dir() -> PathBuf {
     match ProjectDirs::from("", "", "hiroi") {
         Some(dirs) => dirs.data_dir().to_path_buf(),
+        None => PathBuf::from("."),
+    }
+}
+
+/// `~/.config/hiroi` on Linux, `~/Library/Application Support/hiroi`
+/// on macOS, `%APPDATA%\hiroi\config` on Windows.
+pub fn config_dir() -> PathBuf {
+    match ProjectDirs::from("", "", "hiroi") {
+        Some(dirs) => dirs.config_dir().to_path_buf(),
         None => PathBuf::from("."),
     }
 }

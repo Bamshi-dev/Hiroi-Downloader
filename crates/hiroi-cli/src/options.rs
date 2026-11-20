@@ -8,27 +8,48 @@ use hiroi_engine::{Checksum, DownloadRequest, EngineConfig, Quality};
 use hiroi_proto::{Conflict as ProtoConflict, NewJob, Priority, Quality as ProtoQuality};
 
 use crate::args::{Conflict, EngineArgs, RequestArgs, TargetArgs};
+use crate::settings::SettingsFile;
 
-pub fn engine_config(engine: &EngineArgs) -> EngineConfig {
-    EngineConfig {
-        max_connections_per_host: engine.per_host,
-        proxy: engine.proxy.clone(),
-        min_connection_speed: engine.min_speed,
-        preallocate: !engine.no_prealloc,
-        allow_insecure_redirects: engine.allow_insecure_redirects,
-        require_proxy: engine.require_proxy,
-        strip_tracking: engine.strip_tracking,
-        no_referer: engine.no_referer,
-        cookie_jar: !engine.no_cookie_jar,
-        sync_to_disk: !engine.no_sync,
-        interface: engine.interface.clone(),
-        bind_address: engine.bind_address,
-        ip_filter: engine.ip_filter.clone(),
-        allow_local_redirects: engine.allow_local_redirects,
-        anonymous: engine.anonymous,
-        accept_invalid_certificates: engine.no_check_certificate,
-        ..EngineConfig::default()
-    }
+/// Connections to one server when neither a flag nor the file says.
+const DEFAULT_PER_HOST: usize = 16;
+
+/// The engine's settings: the flags, and the settings file for what
+/// they leave out.
+pub fn engine_config(engine: &EngineArgs) -> Result<EngineConfig> {
+    let file = SettingsFile::load()?;
+    let on = |flag: bool, key: &str| flag || file.switch(key);
+    let defaults = EngineConfig::default();
+    Ok(EngineConfig {
+        max_connections_per_host: engine
+            .per_host
+            .or_else(|| {
+                file.number("per-host")
+                    .and_then(|n| usize::try_from(n).ok())
+            })
+            .unwrap_or(DEFAULT_PER_HOST),
+        proxy: engine.proxy.clone().or_else(|| file.text("proxy")),
+        min_connection_speed: engine.min_speed.or_else(|| file.rate("min-speed")),
+        preallocate: !on(engine.no_prealloc, "no-prealloc"),
+        allow_insecure_redirects: on(engine.allow_insecure_redirects, "allow-insecure-redirects"),
+        require_proxy: on(engine.require_proxy, "require-proxy"),
+        strip_tracking: on(engine.strip_tracking, "strip-tracking"),
+        no_referer: on(engine.no_referer, "no-referer"),
+        cookie_jar: !on(engine.no_cookie_jar, "no-cookie-jar"),
+        sync_to_disk: !on(engine.no_sync, "no-sync"),
+        interface: engine.interface.clone().or_else(|| file.text("interface")),
+        bind_address: engine.bind_address.or_else(|| {
+            file.text("bind-address")
+                .and_then(|address| address.parse().ok())
+        }),
+        ip_filter: engine
+            .ip_filter
+            .clone()
+            .or_else(|| file.text("ip-filter").map(PathBuf::from)),
+        allow_local_redirects: on(engine.allow_local_redirects, "allow-local-redirects"),
+        anonymous: on(engine.anonymous, "anonymous"),
+        accept_invalid_certificates: on(engine.no_check_certificate, "no-check-certificate"),
+        ..defaults
+    })
 }
 
 /// Request headers as name/value pairs, cookies and referer included.

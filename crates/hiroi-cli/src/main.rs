@@ -3,6 +3,7 @@
 mod args;
 mod commands;
 mod options;
+mod settings;
 mod size;
 mod ui;
 
@@ -27,6 +28,11 @@ async fn main() -> ExitCode {
         Command::Browser(command) => commands::browser::run(command),
         Command::NativeHost { .. } => commands::browser::native_host(cli.socket).await,
         Command::Network(command) => commands::network::run(command),
+        Command::Settings { command } => {
+            let command = command.unwrap_or(args::SettingsCommand::List { section: None });
+            commands::settings::run(command, cli.socket).await
+        }
+        Command::Search { words } => commands::settings::search(&words.join(" ")),
         command => client_command(command, cli.socket).await,
     };
     result.unwrap_or_else(|error| {
@@ -91,7 +97,9 @@ async fn client_command(
         | Command::Daemon(_)
         | Command::Browser(_)
         | Command::NativeHost { .. }
-        | Command::Network(_) => {
+        | Command::Network(_)
+        | Command::Settings { .. }
+        | Command::Search { .. } => {
             unreachable!("handled in main")
         }
     }

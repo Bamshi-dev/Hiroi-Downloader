@@ -12,7 +12,7 @@ use crate::args::DaemonArgs;
 use crate::options;
 
 pub async fn run(args: DaemonArgs, socket: Option<std::path::PathBuf>) -> Result<ExitCode> {
-    let mut engine = options::engine_config(&args.engine);
+    let mut engine = options::engine_config(&args.engine)?;
     engine.max_active_downloads = args.jobs;
     let mut config = DaemonConfig::with_default_paths(engine);
     if let Some(socket) = socket {

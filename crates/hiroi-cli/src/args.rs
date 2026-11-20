@@ -101,6 +101,36 @@ pub enum Command {
     /// Network interfaces, for binding downloads to a VPN.
     #[command(subcommand)]
     Network(NetworkCommand),
+    /// Show and change settings; without a subcommand, list them.
+    Settings {
+        #[command(subcommand)]
+        command: Option<SettingsCommand>,
+    },
+    /// Find a setting, command, or option by what it does.
+    Search {
+        #[arg(required = true, value_name = "WORDS")]
+        words: Vec<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SettingsCommand {
+    /// Every setting with its value, or those of one section (network,
+    /// privacy, disk, service).
+    List { section: Option<String> },
+    /// One setting's value.
+    Get { key: String },
+    /// Change a setting, e.g. `hiroi settings set interface wg0`.
+    Set { key: String, value: String },
+    /// Put a setting back to its default.
+    Reset { key: String },
+    /// Where the settings file is.
+    Path,
+    /// The same as `hiroi search`.
+    Search {
+        #[arg(required = true, value_name = "WORDS")]
+        words: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -542,9 +572,9 @@ pub struct EngineArgs {
     #[arg(long, value_name = "URL")]
     pub proxy: Option<String>,
 
-    /// Most connections to one server, across all downloads.
-    #[arg(long, value_name = "N", default_value_t = 16)]
-    pub per_host: usize,
+    /// Most connections to one server, across all downloads [default: 16].
+    #[arg(long, value_name = "N")]
+    pub per_host: Option<usize>,
 
     /// Reconnect connections slower than this, e.g. 50K.
     #[arg(long, value_name = "RATE", value_parser = parse_rate)]
