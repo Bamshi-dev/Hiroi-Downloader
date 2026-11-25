@@ -32,6 +32,7 @@ pub fn job_options(job: &NewJob) -> JobOptions {
             .map(str::trim)
             .filter(|group| !group.is_empty())
             .map(str::to_string),
+        replaces: None,
     }
 }
 
@@ -66,6 +67,9 @@ pub fn request(
         .live_limit(options.live_limit_secs.map(Duration::from_secs))
         .extract(options.extract)
         .format(options.format.clone());
+    if let Some(previous) = &options.replaces {
+        request = request.replaces(previous);
+    }
     Ok(request)
 }
 

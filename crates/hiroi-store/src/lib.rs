@@ -75,6 +75,8 @@ pub struct JobOptions {
     pub extract: bool,
     pub format: Option<String>,
     pub group: Option<String>,
+    /// The address before it was refreshed, so the download continues.
+    pub replaces: Option<String>,
 }
 
 /// A job about to be inserted; the store assigns the id.
@@ -100,6 +102,10 @@ pub struct JobUpdate {
     pub total_size: Option<u64>,
     pub downloaded: Option<u64>,
     pub finished_at: Option<i64>,
+    /// A new address, for a link that expired.
+    pub url: Option<String>,
+    /// Boxed: updates are frequent and this one is rare and large.
+    pub options: Option<Box<JobOptions>>,
 }
 
 #[derive(Debug)]
@@ -186,6 +192,15 @@ impl Store {
             transaction.execute(
                 "UPDATE jobs SET total_size = ?2 WHERE id = ?1",
                 params![id.0, total as i64],
+            )?;
+        }
+        if let Some(url) = &update.url {
+            transaction.execute("UPDATE jobs SET url = ?2 WHERE id = ?1", params![id.0, url])?;
+        }
+        if let Some(options) = &update.options {
+            transaction.execute(
+                "UPDATE jobs SET options = ?2 WHERE id = ?1",
+                params![id.0, to_json(options)],
             )?;
         }
         if let Some(downloaded) = update.downloaded {

@@ -129,6 +129,74 @@ async fn pause_and_resume_continue_where_they_stopped() {
     );
 }
 
+#[tokio::test]
+async fn a_refreshed_address_keeps_the_progress() {
+    let size = 4 * MIB;
+    let data = content(size, 4);
+    let server = TestServer::start(Behavior {
+        bytes_per_sec: Some(512 * KIB as u64),
+        ..Behavior::default()
+    })
+    .await;
+    // The same file at the expired address and at the new one; a third
+    // address serves something else.
+    server.put("expired.bin", data.clone());
+    server.put("fresh.bin", data.clone());
+    server.put("other.bin", content(size + 1, 5));
+    let dir = tempfile::tempdir().unwrap();
+    let named = |name: &str| {
+        request(&server, name, dir.path())
+            .file_name("video.bin")
+            .connections(4)
+    };
+
+    let first = engine();
+    let id = first.add(named("expired.bin"));
+    while first.snapshot(id).unwrap().downloaded < MIB as u64 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(first.pause(id));
+    first.wait(id).await;
+    let paused_at = first.snapshot(id).unwrap().downloaded;
+    server.set_behavior(Behavior::default());
+
+    // Another file at the new address is not taken for this one.
+    let second = engine();
+    let other = named("other.bin").replaces(&server.url("expired.bin"));
+    let other_dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        dir.path().join("video.bin.hiroi-part"),
+        other_dir.path().join("video.bin.hiroi-part"),
+    )
+    .unwrap();
+    std::fs::copy(
+        dir.path().join("video.bin.hiroi-state"),
+        other_dir.path().join("video.bin.hiroi-state"),
+    )
+    .unwrap();
+    let snapshot = run(&second, other.output_dir(other_dir.path())).await;
+    assert_eq!(snapshot.status, DownloadStatus::Completed);
+    assert_eq!(
+        std::fs::read(other_dir.path().join("video.bin")).unwrap(),
+        content(size + 1, 5)
+    );
+
+    let before = server.received().len();
+    let snapshot = run(
+        &second,
+        named("fresh.bin").replaces(&server.url("expired.bin")),
+    )
+    .await;
+    assert_eq!(snapshot.status, DownloadStatus::Completed);
+    assert_eq!(std::fs::read(dir.path().join("video.bin")).unwrap(), data);
+    let asked = requested_bytes(&server.received()[before..]);
+    assert_eq!(
+        asked,
+        size as u64 - paused_at,
+        "the saved part was fetched again"
+    );
+}
+
 /// Bytes covered by the Range headers of `requests`, overlaps counted
 /// once. The probe's single byte is left out.
 fn requested_bytes(requests: &[hiroi_testserver::Received]) -> u64 {

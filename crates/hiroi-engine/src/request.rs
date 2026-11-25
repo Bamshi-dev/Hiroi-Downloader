@@ -107,6 +107,9 @@ pub struct DownloadRequest {
     pub(crate) own_cookies: Option<String>,
     /// Hashes of every piece, from a Metalink file.
     pub(crate) pieces: Option<std::sync::Arc<crate::checksum::PieceHashes>>,
+    /// The address the download had before it expired; see
+    /// [`DownloadRequest::replaces`].
+    pub(crate) replaces: Option<String>,
 }
 
 impl DownloadRequest {
@@ -124,6 +127,7 @@ impl DownloadRequest {
             stream: StreamOptions::default(),
             derived: false,
             own_cookies: None,
+            replaces: None,
             pieces: None,
         })
     }
@@ -206,6 +210,15 @@ impl DownloadRequest {
     /// Variant to pick from streams that offer several.
     pub fn quality(mut self, quality: Quality) -> Self {
         self.stream.quality = quality;
+        self
+    }
+
+    /// Continues a download started from `previous`, an address that
+    /// has expired. Its progress is kept when the new address serves a
+    /// file of the same size; that it is the same file is the caller's
+    /// word, so a checksum, when known, is worth giving too.
+    pub fn replaces(mut self, previous: &str) -> Self {
+        self.replaces = Some(previous.to_string());
         self
     }
 

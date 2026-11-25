@@ -92,6 +92,9 @@ pub enum Command {
     PowerOffWhenDone { state: Switch },
     /// Stop the background service; running jobs continue next time.
     Stop,
+    /// Give a paused or failed job a new address when its link expired;
+    /// what was downloaded is kept if the file is the same.
+    Refresh { id: i64, url: String },
     /// List, pause, or resume groups of jobs.
     #[command(subcommand)]
     Group(GroupCommand),

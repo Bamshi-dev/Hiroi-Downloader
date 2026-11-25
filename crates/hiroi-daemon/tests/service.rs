@@ -596,3 +596,69 @@ async fn smart_folders_can_be_turned_off() {
     };
     assert!(!settings.smart_folders);
 }
+
+#[tokio::test]
+async fn expired_addresses_can_be_refreshed() {
+    let server = TestServer::start(Behavior {
+        bytes_per_sec: Some(400_000),
+        ..Behavior::default()
+    })
+    .await;
+    let data = content(2_000_000, 9);
+    server.put("expired.bin", data.clone());
+    server.put("fresh.bin", data.clone());
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+
+    let id = add(
+        &mut client,
+        NewJob {
+            url: server.url("expired.bin"),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    while job(&mut client, id).await.downloaded < 400_000 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let refused = client
+        .call(Request::Refresh {
+            job: id,
+            url: server.url("fresh.bin"),
+        })
+        .await
+        .unwrap_err();
+    assert!(refused.to_string().contains("pause"), "{refused}");
+    client.call(Request::Pause { job: id }).await.unwrap();
+    wait_for(&mut client, id, JobStatus::Paused).await;
+
+    server.set_behavior(Behavior::default());
+    client
+        .call(Request::Refresh {
+            job: id,
+            url: server.url("fresh.bin"),
+        })
+        .await
+        .unwrap();
+    let before = server.received().len();
+    client.call(Request::Resume { job: id }).await.unwrap();
+    wait_for(&mut client, id, JobStatus::Completed).await;
+
+    let done = job(&mut client, id).await;
+    let path = done.path.expect("a finished job has a path");
+    assert_eq!(path.file_name().unwrap(), "expired.bin", "the name stays");
+    assert_eq!(std::fs::read(&path).unwrap(), data);
+    let fresh: Vec<_> = server.received()[before..]
+        .iter()
+        .filter(|r| r.name == "fresh.bin")
+        .cloned()
+        .collect();
+    assert!(!fresh.is_empty(), "the new address was used");
+    let full = fresh.iter().any(|r| {
+        r.headers.get("range").is_none_or(|v| {
+            v.to_str().unwrap().starts_with("bytes=0-")
+                && !v.to_str().unwrap().starts_with("bytes=0-0")
+        })
+    });
+    assert!(!full, "the saved part was fetched again: {fresh:?}");
+}

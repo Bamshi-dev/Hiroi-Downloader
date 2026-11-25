@@ -83,6 +83,16 @@ async fn client_command(
         }
         Command::Stop => jobs::stop(&mut client).await,
         Command::Group(command) => jobs::group(&mut client, command).await,
+        Command::Refresh { id, url } => {
+            client
+                .call(hiroi_proto::Request::Refresh {
+                    job: hiroi_proto::JobId(id),
+                    url,
+                })
+                .await?;
+            println!("Job {id} has its new address; `hiroi resume {id}` continues it.");
+            Ok(ExitCode::SUCCESS)
+        }
         Command::SmartFolders { state } => {
             let enabled = matches!(state, args::Switch::On);
             jobs::switch(

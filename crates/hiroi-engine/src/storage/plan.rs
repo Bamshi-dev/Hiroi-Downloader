@@ -34,7 +34,13 @@ pub(crate) fn prepare(
         .or_else(|| remote.file_name.as_deref().and_then(sanitize_file_name))
         .unwrap_or_else(|| FALLBACK_FILE_NAME.to_string());
 
-    let resumable = |paths: &DownloadPaths| resumable(paths, remote, source);
+    // Compared as progress records name sources: without the query.
+    let previous = request
+        .replaces
+        .as_deref()
+        .and_then(|address| reqwest::Url::parse(address).ok())
+        .map(|url| crate::net::source_key(&url));
+    let resumable = |paths: &DownloadPaths| resumable(paths, remote, source, previous.as_deref());
     let fresh = |paths| Plan {
         paths,
         resume: None,
@@ -82,11 +88,32 @@ fn rename(
     Err(EngineError::AlreadyExists(dir.join(name)))
 }
 
-fn resumable(paths: &DownloadPaths, remote: &RemoteFile, source: &str) -> Option<ControlFile> {
+fn resumable(
+    paths: &DownloadPaths,
+    remote: &RemoteFile,
+    source: &str,
+    previous: Option<&str>,
+) -> Option<ControlFile> {
     let size = remote.size.filter(|_| remote.ranges)?;
     if !paths.part_path.exists() {
         return None;
     }
-    ControlFile::load(&paths.control_path)
-        .filter(|control| control.matches(source, size, remote.validator.as_deref()))
+    let mut control = ControlFile::load(&paths.control_path)?;
+    if control.matches(source, size, remote.validator.as_deref()) {
+        return Some(control);
+    }
+    // A refreshed address: the user says it serves the same file, and
+    // the size has to agree. Versions are not compared, since another
+    // server, or another signed link, names the same file differently.
+    let refreshed = previous == Some(control.source.as_str()) && control.total_size == size;
+    refreshed.then(|| {
+        if control.validator.is_some() && control.validator != remote.validator {
+            tracing::warn!(
+                "the new address names its version differently; continuing on the user's word"
+            );
+        }
+        control.source = source.to_string();
+        control.validator = remote.validator.clone();
+        control
+    })
 }

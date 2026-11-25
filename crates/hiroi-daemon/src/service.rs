@@ -295,6 +295,7 @@ impl Service {
             }),
             Request::Add(job) => self.add(*job).await.map(|job| Response::Added { job }),
             Request::AddBatch(batch) => Ok(Response::Batch(self.add_batch(*batch).await)),
+            Request::Refresh { job, url } => self.refresh(job, &url).map(done),
             Request::Groups => Ok(Response::Groups {
                 groups: self.groups(),
             }),
@@ -723,6 +724,65 @@ impl Service {
         Ok(())
     }
 
+    /// Points a paused or failed job at a new address. The job is loaded
+    /// again, paused, so the next resume probes the new address; the
+    /// engine keeps the progress if the file there has the same size.
+    fn refresh(&self, id: JobId, url: &str) -> Result<(), String> {
+        hiroi_engine::DownloadRequest::new(url).map_err(|e| e.to_string())?;
+        let (row, download) = {
+            let state = self.state.lock();
+            let row = state.rows.get(&id).cloned().ok_or_else(|| unknown(id))?;
+            (row, state.loaded.get(&id).copied())
+        };
+        match row.status {
+            JobStatus::Paused | JobStatus::Failed => {}
+            JobStatus::Completed | JobStatus::Cancelled => {
+                return Err(format!("job {id} is {}", row.status.as_str()));
+            }
+            _ => return Err(format!("pause job {id} first: hiroi pause {id}")),
+        }
+        let mut options = row.options.clone();
+        // The new address may name the file differently; the progress
+        // belongs to the old name.
+        options.file_name = options
+            .file_name
+            .or_else(|| row.file_name.clone())
+            .or_else(|| {
+                row.path
+                    .as_deref()
+                    .and_then(|path| path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+            });
+        options.replaces = Some(row.url.clone());
+        if let Some(download) = download {
+            let mut state = self.state.lock();
+            state.loaded.remove(&id);
+            state.jobs_of.remove(&download);
+            drop(state);
+            self.engine.remove(download);
+        }
+        self.update(
+            id,
+            JobUpdate {
+                url: Some(convert::strip_credentials(url)),
+                options: Some(Box::new(options)),
+                status: Some(JobStatus::Paused),
+                error: Some(None),
+                ..JobUpdate::default()
+            },
+        );
+        // The engine gets the address as given, credentials included.
+        let Some(updated) = self.state.lock().rows.get(&id).cloned() else {
+            return Ok(());
+        };
+        let in_memory = StoredJob {
+            url: url.to_string(),
+            ..updated
+        };
+        self.load(&in_memory, &[], false);
+        Ok(())
+    }
+
     fn cancel(&self, id: JobId) -> Result<(), String> {
         let download = self.download_of(id)?;
         if self.engine.cancel(download) {
@@ -1025,6 +1085,7 @@ impl Service {
             total_size: snapshot.total_size,
             downloaded: Some(snapshot.downloaded),
             finished_at: finished.then(now),
+            ..JobUpdate::default()
         };
         self.update(id, update);
         if finished {
@@ -1063,6 +1124,12 @@ fn apply(row: &mut StoredJob, update: &JobUpdate) {
     }
     if let Some(finished) = update.finished_at {
         row.finished_at = Some(finished);
+    }
+    if let Some(url) = &update.url {
+        row.url.clone_from(url);
+    }
+    if let Some(options) = &update.options {
+        row.options = options.as_ref().clone();
     }
 }
 

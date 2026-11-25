@@ -101,6 +101,12 @@ pub enum Request {
     PowerOffWhenDone {
         enabled: bool,
     },
+    /// Gives a paused or failed job a new address, for a link that
+    /// expired; what was downloaded is kept when the file is the same.
+    Refresh {
+        job: JobId,
+        url: String,
+    },
     /// Groups with their job counts.
     Groups,
     PauseGroup {
