@@ -126,6 +126,17 @@ pub enum Request {
     SetSmartFolders {
         enabled: bool,
     },
+    /// Unpack finished archives into a folder next to them (off by
+    /// default).
+    SetUnpackArchives {
+        enabled: bool,
+    },
+    /// A command run after every finished download, such as a virus
+    /// scanner: an argument list, with `{path}`, `{name}`, and `{dir}`
+    /// replaced. `None` runs nothing.
+    SetAfterDownload {
+        command: Option<Vec<String>>,
+    },
     /// The settings the service keeps itself.
     ServiceSettings,
     Schedules,
@@ -374,6 +385,10 @@ pub struct ServiceSettings {
     pub notifications: bool,
     pub smart_folders: bool,
     pub global_speed_limit: Option<u64>,
+    #[serde(default)]
+    pub unpack_archives: bool,
+    #[serde(default)]
+    pub after_download: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

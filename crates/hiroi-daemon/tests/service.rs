@@ -711,3 +711,64 @@ async fn exports_leave_cookies_and_commands_out() {
     };
     assert_eq!(jobs.len(), 2);
 }
+
+#[tokio::test]
+async fn finished_downloads_are_scanned_and_unpacked() {
+    let has = |program: &str| {
+        std::process::Command::new(program)
+            .arg("-h")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok()
+    };
+    if !has("zip") || !has("unzip") {
+        return;
+    }
+    let source = tempfile::tempdir().unwrap();
+    std::fs::write(source.path().join("inside.txt"), b"unpacked").unwrap();
+    std::process::Command::new("zip")
+        .current_dir(source.path())
+        .args(["-q", "bundle.zip", "inside.txt"])
+        .status()
+        .unwrap();
+    let server = TestServer::start(Behavior::default()).await;
+    server.put(
+        "bundle.zip",
+        std::fs::read(source.path().join("bundle.zip")).unwrap(),
+    );
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+    client
+        .call(Request::SetUnpackArchives { enabled: true })
+        .await
+        .unwrap();
+    client
+        .call(Request::SetAfterDownload {
+            command: Some(vec![
+                "cp".into(),
+                "{path}".into(),
+                "{dir}/scanned.zip".into(),
+            ]),
+        })
+        .await
+        .unwrap();
+
+    let id = add(
+        &mut client,
+        NewJob {
+            url: server.url("bundle.zip"),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    wait_for(&mut client, id, JobStatus::Completed).await;
+    let archives = fixture.downloads().join("Archives");
+    let unpacked = archives.join("bundle").join("inside.txt");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !(unpacked.exists() && archives.join("scanned.zip").exists()) {
+        assert!(tokio::time::Instant::now() < deadline, "nothing happened");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(std::fs::read(unpacked).unwrap(), b"unpacked");
+}

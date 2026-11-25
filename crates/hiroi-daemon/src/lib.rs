@@ -22,6 +22,7 @@ pub mod schedule;
 mod server;
 mod service;
 mod transport;
+mod unpack;
 
 pub use client::{Client, ClientError};
 pub use service::{DaemonConfig, DaemonError, run};

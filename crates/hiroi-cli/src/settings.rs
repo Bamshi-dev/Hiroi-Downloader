@@ -212,6 +212,18 @@ pub const SETTINGS: &[Setting] = &[
         "",
         "Combined speed limit of the service's downloads, e.g. 2M.",
     ),
+    service(
+        "unpack-archives",
+        Kind::Switch,
+        "false",
+        "Unpack finished archives (zip, 7z, rar, tar; split ones too) into a folder next to them.",
+    ),
+    service(
+        "after-download",
+        Kind::Text,
+        "",
+        "Command run after every download, e.g. a virus scanner: clamscan --no-summary {path}",
+    ),
 ];
 
 pub fn find(key: &str) -> Result<&'static Setting> {

@@ -90,6 +90,11 @@ fn current(setting: &Setting, file: &SettingsFile, service: Option<&ServiceSetti
             Some(service) => match setting.key {
                 "notifications" => on_off(service.notifications),
                 "smart-folders" => on_off(service.smart_folders),
+                "unpack-archives" => on_off(service.unpack_archives),
+                "after-download" => service
+                    .after_download
+                    .as_ref()
+                    .map_or("none".into(), shell_words::join),
                 "speed-limit" => service
                     .global_speed_limit
                     .map_or("unlimited".into(), |limit| {
@@ -141,6 +146,14 @@ async fn set(key: &str, value: Option<&str>, socket: Option<PathBuf>) -> Result<
                 },
                 "smart-folders" => Request::SetSmartFolders {
                     enabled: enabled()?,
+                },
+                "unpack-archives" => Request::SetUnpackArchives {
+                    enabled: enabled()?,
+                },
+                // Split as a shell would, but run without one: the file
+                // name goes into its argument whatever it contains.
+                "after-download" => Request::SetAfterDownload {
+                    command: Some(shell_words::split(value)?).filter(|argv| !argv.is_empty()),
                 },
                 "speed-limit" => Request::SetSpeedLimit {
                     job: None,

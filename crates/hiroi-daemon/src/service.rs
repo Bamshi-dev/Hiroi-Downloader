@@ -25,7 +25,7 @@ use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::schedule::{self, Desired, Moment};
-use crate::{actions, category, convert, folders, paths, server};
+use crate::{actions, category, convert, folders, paths, server, unpack};
 
 /// How often the progress of running jobs is written to the database.
 const PROGRESS_SAVE_INTERVAL: Duration = Duration::from_secs(5);
@@ -36,6 +36,9 @@ const GLOBAL_LIMIT_KEY: &str = "global_speed_limit";
 const CATEGORIES_KEY: &str = "categories";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const SMART_FOLDERS_KEY: &str = "smart_folders";
+const UNPACK_KEY: &str = "unpack_archives";
+/// The command run after every download, as a JSON argument list.
+const AFTER_DOWNLOAD_KEY: &str = "after_download";
 
 #[derive(Debug, Clone)]
 pub struct DaemonConfig {
@@ -160,6 +163,11 @@ struct State {
     categories: Option<Categories>,
     notifications: bool,
     smart_folders: bool,
+    unpack_archives: bool,
+    after_download: Option<Vec<String>>,
+    /// Archives unpacked since the service started, so a set of parts is
+    /// unpacked once.
+    unpacked: HashSet<PathBuf>,
     power_off_when_done: bool,
 }
 
@@ -222,6 +230,8 @@ impl Service {
                     (
                         store.setting(NOTIFICATIONS_KEY)?,
                         store.setting(SMART_FOLDERS_KEY)?,
+                        store.setting(UNPACK_KEY)?,
+                        store.setting(AFTER_DOWNLOAD_KEY)?,
                     ),
                 ))
             })
@@ -237,6 +247,12 @@ impl Service {
             state.categories = categories.and_then(|json| serde_json::from_str(&json).ok());
             state.notifications = switches.0.as_deref() != Some("off");
             state.smart_folders = switches.1.as_deref() != Some("off");
+            state.unpack_archives = switches.2.as_deref() == Some("on");
+            state.after_download = switches
+                .3
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+                .filter(|argv| !argv.is_empty());
         }
         for row in rows {
             let id = row.id;
@@ -317,12 +333,29 @@ impl Service {
                 self.save_switch(SMART_FOLDERS_KEY, enabled);
                 Ok(Response::Done)
             }
+            Request::SetUnpackArchives { enabled } => {
+                self.state.lock().unpack_archives = enabled;
+                self.save_switch(UNPACK_KEY, enabled);
+                Ok(Response::Done)
+            }
+            Request::SetAfterDownload { command } => {
+                let command = command.filter(|argv| !argv.is_empty());
+                let json =
+                    serde_json::to_string(&command.clone().unwrap_or_default()).unwrap_or_default();
+                self.state.lock().after_download = command;
+                let _ = self
+                    .writes
+                    .send(Write::Setting(AFTER_DOWNLOAD_KEY.into(), json));
+                Ok(Response::Done)
+            }
             Request::ServiceSettings => {
                 let state = self.state.lock();
                 Ok(Response::ServiceSettings(ServiceSettings {
                     notifications: state.notifications,
                     smart_folders: state.smart_folders,
                     global_speed_limit: state.base_limit,
+                    unpack_archives: state.unpack_archives,
+                    after_download: state.after_download.clone(),
                 }))
             }
             Request::List => Ok(Response::Jobs { jobs: self.jobs() }),
@@ -603,14 +636,96 @@ impl Service {
         if status == JobStatus::Completed
             && let Some(path) = &row.path
         {
+            // The command for every download first, such as a virus
+            // scanner, then the job's own.
+            let after_download = self.state.lock().after_download.clone();
+            if let Some(argv) = &after_download {
+                actions::run_after(argv, path);
+            }
             if let Some(argv) = &row.options.run_after {
                 actions::run_after(argv, path);
             }
             if row.options.open_folder {
                 actions::open_folder(path);
             }
+            self.unpack_finished(id, notify);
         }
         self.check_power_off();
+    }
+
+    /// Unpacks the archive the job finished, once every part of it the
+    /// service knows of has finished. See [`unpack`].
+    fn unpack_finished(&self, id: JobId, notify: bool) {
+        let (kind, first, folder) = {
+            let mut state = self.state.lock();
+            if !state.unpack_archives {
+                return;
+            }
+            let Some(row) = state.rows.get(&id) else {
+                return;
+            };
+            let Some(part) = row
+                .path
+                .as_deref()
+                .and_then(|path| path.file_name()?.to_str())
+                .and_then(unpack::part_of)
+            else {
+                return;
+            };
+            let dir = row.dir.clone();
+            // Parts are found by the name they will have, so those that
+            // have not started yet count too.
+            let members: Vec<&StoredJob> = state
+                .rows
+                .values()
+                .filter(|other| other.dir == dir && other.status != JobStatus::Cancelled)
+                .filter(|other| {
+                    expected_name(other)
+                        .and_then(|name| unpack::part_of(&name))
+                        .is_some_and(|p| p.set == part.set && p.kind == part.kind)
+                })
+                .collect();
+            if members
+                .iter()
+                .any(|other| other.status != JobStatus::Completed)
+            {
+                return;
+            }
+            let Some(first) = members
+                .iter()
+                .filter_map(|other| {
+                    let path = other.path.clone()?;
+                    let number = unpack::part_of(path.file_name()?.to_str()?)?.number;
+                    Some((number, path))
+                })
+                .min_by_key(|(number, _)| *number)
+                .map(|(_, path)| path)
+            else {
+                return;
+            };
+            if !state.unpacked.insert(first.clone()) {
+                return;
+            }
+            let parent = first.parent().map(PathBuf::from).unwrap_or_default();
+            (part.kind, first, unpack::folder_for(&parent, &part.set))
+        };
+        tokio::spawn(async move {
+            let name = folder.display().to_string();
+            match unpack::unpack(kind, &first, &folder).await {
+                Ok(program) => {
+                    tracing::info!(archive = %first.display(), %program, "unpacked");
+                    if notify {
+                        actions::notify("Unpacked", &name);
+                    }
+                }
+                Err(reason) => {
+                    tracing::warn!(archive = %first.display(), %reason, "not unpacked");
+                    if notify {
+                        actions::notify("Could not unpack", &reason);
+                    }
+                }
+            }
+        });
     }
 
     /// Powers off once nothing is left to run, if the user asked for it.
@@ -1249,6 +1364,17 @@ fn lowest(a: Option<u64>, b: Option<u64>) -> Option<u64> {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
     }
+}
+
+/// The name a job's file has or will have.
+fn expected_name(row: &StoredJob) -> Option<String> {
+    row.path
+        .as_deref()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .or_else(|| row.file_name.clone())
+        .or_else(|| row.options.file_name.clone())
+        .or_else(|| category::name_from_url(&row.url))
 }
 
 /// A name for a batch the user did not name; see
