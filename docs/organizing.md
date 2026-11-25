@@ -43,10 +43,16 @@ Programs.
 ```sh
 hiroi category list
 hiroi category set ebooks --folder Books --ext epub,mobi
+hiroi category set course --folder Course --site uni.example.edu
 hiroi category remove ebooks
 hiroi category off            # save straight into the download folder
 hiroi category on
 ```
+
+A category for sites takes downloads from those sites and their
+subdomains; with `--ext` as well, both have to match. Categories for
+sites come before those for types, so a video from the course site goes
+to `Course`, not `Videos`.
 
 ## Groups
 
@@ -113,3 +119,47 @@ underscores, and in names of six letters or more, a typo is
 forgiven: one wrong, missing, extra, or swapped letter (two from
 twelve letters). `gardening` and `gardenning` are one series; `math`
 and `maps` are not.
+
+## After a download
+
+The service can do more once a download finishes. These are
+[settings](settings.md):
+
+- **A command after every download**, such as a virus scanner:
+  ```sh
+  hiroi settings set after-download 'clamscan --no-summary {path}'
+  ```
+  `{path}`, `{name}`, and `{dir}` are replaced. The command is split
+  like a shell command but runs without a shell, so a file name cannot
+  add commands. It runs before a job's own `--then` command.
+- **Unpacking archives**, off by default:
+  ```sh
+  hiroi settings set unpack-archives on
+  ```
+  A finished zip, 7z, rar, or tar archive is unpacked into a new folder
+  next to it, named after it. An archive in parts (`name.part1.rar`,
+  `name.7z.001`, ...) waits until every part in the list has finished.
+  7-Zip is used when installed, otherwise `unzip`, `unrar`, or `tar`.
+  Nothing existing is replaced, and an archive that needs a password
+  fails with a notification instead of waiting for one.
+- **Staying awake**, on by default: while downloads run, the computer
+  does not go to sleep (through `systemd-inhibit` on Linux and
+  `caffeinate` on macOS). `hiroi settings set keep-awake off` turns it
+  off.
+
+Adding a download that failed again tries it again, in the same job;
+other downloads that are in the list already are refused, as
+duplicates.
+
+## Moving the list
+
+```sh
+hiroi export jobs.json              # the unfinished jobs
+hiroi export jobs.json --finished   # all of them
+hiroi import jobs.json              # on another machine
+```
+
+The list has the addresses, folders, names, queues, groups, and
+download options. Headers stay out, since they hold cookies, and so do
+commands to run: a list may come from someone else, and importing one
+never makes your machine run anything.

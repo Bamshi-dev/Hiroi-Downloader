@@ -16,7 +16,7 @@ Settings live in one of two places:
 
 ```sh
 hiroi settings                       # every setting and its value
-hiroi settings list network          # one section: network, privacy, disk, or service
+hiroi settings list network          # one section: network, privacy, disk, programs, or service
 hiroi settings get interface
 hiroi settings set interface wg0
 hiroi settings set speed-limit 2M
@@ -67,11 +67,24 @@ Disk:
 - `no-prealloc`: don't reserve disk space first (off).
 - `no-sync`: don't flush to disk before saving progress (off).
 
+Programs:
+
+- `yt-dlp`: the yt-dlp program for video sites (the one on the PATH).
+
 Service:
 
 - `notifications`: desktop notifications when downloads finish (on).
 - `smart-folders`: move episodes of a series into a folder (on).
 - `speed-limit`: combined speed limit of the service (unlimited).
+- `keep-awake`: keep the computer from sleeping while downloads run
+  (on).
+- `unpack-archives`: unpack finished archives into a folder next to
+  them (off).
+- `after-download`: a command run after every download, such as a
+  virus scanner (none).
+
+[After a download](organizing.md#after-a-download) explains the last
+three.
 
 [Network and privacy](network-and-privacy.md) explains the network
 and privacy settings in full.

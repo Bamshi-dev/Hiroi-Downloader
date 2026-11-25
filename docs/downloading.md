@@ -58,11 +58,59 @@ MD5, SHA-1, SHA-256, and SHA-512 are checked once the file is
 complete. Mirrors serve the same file at the same time; a mirror that
 answers with a different size or fails keeps out of it.
 
+Any file can be checked, wherever it came from:
+
+```sh
+hiroi checksum debian.iso                         # prints sha256:...
+hiroi checksum debian.iso 9f86d081884c7d65...     # OK or MISMATCH
+hiroi checksum file.zip --algorithm md5
+```
+
+A hash given as plain hex is read by its length (32 is MD5, 40 SHA-1,
+64 SHA-256, and 128 SHA-512). A mismatch exits with an error.
+
 ## Many files at once
 
 `hiroi get` takes several URLs, or `-i FILE` with one per line, and
 runs 3 at a time (`-j N`). `hiroi add` with several URLs makes a
 [group](organizing.md#groups).
+
+A numbered series can be written as one URL:
+
+```sh
+hiroi add 'https://example.com/course/lecture[01-20].mp4'
+hiroi add 'https://example.com/backup.part[1-9].rar'
+hiroi get 'https://example.com/scans/page[0-100:10].png'
+hiroi get 'https://example.com/{intro,setup,end}.pdf'
+```
+
+- `[1-20]` counts, and `[01-20]` keeps the zeros: `01`, `02`, and so
+  on.
+- `[0-100:10]` counts in steps of 10.
+- `[a-z]` runs through letters.
+- `{intro,setup,end}` takes each word.
+
+Several give every combination, in order. Quote the URL so the shell
+leaves the brackets alone. Brackets that are not a range, such as an
+IPv6 address, stay as written, and more than 10,000 URLs at once are
+refused as a likely typo. `--literal` takes URLs exactly as written.
+
+## Expired links
+
+Many sites hand out links that stop working after a while, sometimes
+in the middle of a big download. Copy a fresh link from the site and
+give it to the job:
+
+```sh
+hiroi pause 7                       # if it is still trying
+hiroi refresh 7 'https://example.com/new-link?token=...'
+hiroi resume 7
+```
+
+What was downloaded is kept when the file at the new address has the
+same size, and it keeps the name it had. Hiroi cannot tell for certain
+that it is the same file, so give a checksum where the site offers
+one.
 
 ## Request headers
 
@@ -95,6 +143,16 @@ hiroi get -f "bv*+ba/b" https://video.example/watch?v=abc
 `-x` hands the page to yt-dlp, which finds the media; Hiroi then
 downloads it with its own connections. `-f` passes a yt-dlp format
 selection (and implies `-x`).
+
+yt-dlp first reads the page without your browser's cookies, since
+signed in, some sites offer it fewer formats; the cookies are used
+when that fails, for videos that need a login.
+
+Sites change often, and an old yt-dlp is the commonest reason a video
+page fails, so Hiroi says when yours is more than four months old.
+Distributions often ship old versions; yt-dlp's own build, which
+updates itself with `yt-dlp -U`, avoids that. `--yt-dlp PATH`, or
+`hiroi settings set yt-dlp PATH`, picks the program to use.
 
 ## Metalink
 

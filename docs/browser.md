@@ -27,6 +27,10 @@ started](getting-started.md#the-browser-extension) for installing it.
 The toolbar button shows ✓ or ! for a few seconds afterwards; its
 tooltip says what happened.
 
+When a download is in the list already, the popup says so ("Already
+downloaded as job 8") and offers to download it again. One that
+failed is simply tried again.
+
 ## The grab page
 
 The grab page lists what the page shows, including what scripts added

@@ -52,6 +52,11 @@ from being redirected into the local network; `--require-proxy`,
 `--strip-tracking`, `--no-referer`, and `--anonymous` send less.
 Cookies and credentials are never written to disk or to a log.
 
+A numbered series fits in one URL (`lecture[01-20].mp4`), an expired
+link can be replaced without losing what was downloaded, finished
+archives can be unpacked and scanned, the computer stays awake while
+downloads run, and the job list can be exported and imported.
+
 Every setting can be kept in a settings file, and `hiroi search` finds
 a setting, a command, or an option by what it does. The
 [guide](docs/README.md) explains every feature.
@@ -159,8 +164,8 @@ the segment layout, ready for a segment bar.
 ## Tests
 
 ```sh
-cargo test --workspace                  # 202 tests
-cargo test --workspace --all-features   # 221, with FTP, SFTP, and torrents
+cargo test --workspace                  # 221 tests
+cargo test --workspace --all-features   # 240, with FTP, SFTP, and torrents
 ```
 
 The tests download from servers they start themselves, which throttle,
@@ -178,7 +183,9 @@ watcher, page grabbing, HLS and DASH streams, video sites through
 yt-dlp, Metalink with piece repair, FTP, SFTP, and BitTorrent (through
 SOCKS5 proxies where they can), interface binding, the IP filter, the
 exposure report, the settings file and search, fuzzing, and
-benchmarks.
+benchmarks. Also numbered batches, refreshing expired links, export and
+import, unpacking archives, a command after every download, staying
+awake, categories by site, and `hiroi checksum`.
 
 Next:
 
@@ -187,6 +194,8 @@ Next:
   registration through the Windows registry.
 - Subtitles and the choice of audio language for streams.
 - Choosing which files of a torrent to download, and seeding limits.
+- A remote-control API, DNS over HTTPS, and keeping the computer awake
+  on Windows.
 - Telegram and other apps as sources. The engine's protocol boundary
   (probe a source, open a range of it) is where they would plug in.
 
