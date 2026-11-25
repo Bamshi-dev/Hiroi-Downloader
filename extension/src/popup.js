@@ -2,6 +2,27 @@
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * Puts the outcome on `button`. When the download is in the list
+ * already, the button offers to download it again.
+ */
+function show(button, answer, item) {
+  const { text, again } = describe(answer);
+  button.textContent = again ? `${text}. Download again?` : text;
+  button.title = answer.ok ? "" : answer.error || "";
+  button.disabled = !again;
+  if (!again) return;
+  button.addEventListener(
+    "click",
+    async (event) => {
+      event.stopImmediatePropagation();
+      button.disabled = true;
+      show(button, await sendToHiroi({ ...item, allowDuplicate: true }), item);
+    },
+    { once: true, capture: true },
+  );
+}
+
 (async () => {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
 
@@ -22,9 +43,8 @@ const $ = (id) => document.getElementById(id);
     button.textContent = "Download";
     button.addEventListener("click", async () => {
       button.disabled = true;
-      const sent = await sendToHiroi({ url: entry.url, referrer: tab.url });
-      button.textContent = sent.ok ? `Job ${sent.job}` : "Failed";
-      button.title = sent.ok ? "" : sent.error;
+      const item = { url: entry.url, referrer: tab.url };
+      show(button, await sendToHiroi(item), item);
     });
     row.append(name, info, button);
     $("media").append(row);
@@ -32,8 +52,7 @@ const $ = (id) => document.getElementById(id);
 
   $("video").addEventListener("click", async () => {
     $("video").disabled = true;
-    const sent = await sendToHiroi({ url: tab.url, extract: true });
-    $("video").textContent = sent.ok ? `Added as job ${sent.job}` : `Hiroi: ${sent.error}`;
+    show($("video"), await sendToHiroi({ url: tab.url, extract: true }), { url: tab.url, extract: true });
   });
 
   $("grab").addEventListener("click", async () => {

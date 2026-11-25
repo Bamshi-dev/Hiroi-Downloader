@@ -138,6 +138,7 @@ async function downloadMessage(item, quality, cookies = new Map()) {
     fileName: item.fileName || null,
     extract: Boolean(item.extract),
     quality: quality || null,
+    allowDuplicate: Boolean(item.allowDuplicate),
   };
 }
 
@@ -169,6 +170,29 @@ async function sendBatch(items, title, group) {
 
 async function ping() {
   return native({ type: "ping" });
+}
+
+/**
+ * The job a refusal names when the download is in the list already, as
+ * `{ job, status }`, or null for other answers.
+ */
+function duplicateOf(answer) {
+  const found = !answer.ok && /already in the list as job (\d+) \((\w+)\)/.exec(answer.error || "");
+  return found ? { job: Number(found[1]), status: found[2] } : null;
+}
+
+/**
+ * Says what happened to a download in a few words, for buttons.
+ * Offers `again` when the download is in the list already.
+ */
+function describe(answer) {
+  const duplicate = duplicateOf(answer);
+  if (duplicate) {
+    const done = duplicate.status === "completed";
+    return { text: `${done ? "Already downloaded" : "Already in the list"} as job ${duplicate.job}`, again: true };
+  }
+  if (answer.ok) return { text: `Added as job ${answer.job}`, again: false };
+  return { text: `Hiroi: ${answer.error}`, again: false };
 }
 
 /** A short name for a URL, for lists. */

@@ -59,6 +59,8 @@ pub struct BrowserDownload {
     /// `best`, `worst`, or a height such as 720.
     pub quality: Option<String>,
     pub paused: bool,
+    /// Download it although the list has it already.
+    pub allow_duplicate: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -207,6 +209,7 @@ pub fn job(download: BrowserDownload) -> Result<NewJob, String> {
         extract: download.extract,
         quality,
         paused: download.paused,
+        allow_duplicate: download.allow_duplicate,
         ..NewJob::default()
     })
 }
