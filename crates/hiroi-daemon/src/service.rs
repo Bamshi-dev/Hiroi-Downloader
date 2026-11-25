@@ -463,6 +463,12 @@ impl Service {
         if !job.allow_duplicate
             && let Some(existing) = self.duplicate_of(&job.url, &dir, job.file_name.as_deref())
         {
+            // Adding a failed download again means trying it again, with
+            // the headers (and cookies) it comes with now.
+            if existing.status == JobStatus::Failed {
+                self.retry(&existing, &job);
+                return Ok(existing.id);
+            }
             return Err(format!(
                 "already in the list as job {} ({}); add it with --allow-duplicate to download it again",
                 existing.id,
@@ -869,6 +875,38 @@ impl Service {
             },
         );
         Ok(())
+    }
+
+    /// Starts a failed job again, as `job` asks for it now.
+    fn retry(&self, existing: &StoredJob, job: &NewJob) {
+        let id = existing.id;
+        let download = {
+            let mut state = self.state.lock();
+            let download = state.loaded.remove(&id);
+            if let Some(download) = download {
+                state.jobs_of.remove(&download);
+            }
+            download
+        };
+        if let Some(download) = download {
+            self.engine.remove(download);
+        }
+        self.update(
+            id,
+            JobUpdate {
+                status: Some(JobStatus::Queued),
+                error: Some(None),
+                ..JobUpdate::default()
+            },
+        );
+        let in_memory = StoredJob {
+            url: job.url.clone(),
+            mirrors: job.mirrors.clone(),
+            status: JobStatus::Queued,
+            error: None,
+            ..existing.clone()
+        };
+        self.load(&in_memory, &job.headers, true);
     }
 
     /// Points a paused or failed job at a new address. The job is loaded

@@ -772,3 +772,21 @@ async fn finished_downloads_are_scanned_and_unpacked() {
     }
     assert_eq!(std::fs::read(unpacked).unwrap(), b"unpacked");
 }
+
+#[tokio::test]
+async fn adding_a_failed_job_again_tries_it_again() {
+    let server = TestServer::start(Behavior::default()).await;
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+    let job_for = || NewJob {
+        url: server.url("late.bin"),
+        ..NewJob::default()
+    };
+
+    let id = add(&mut client, job_for()).await;
+    wait_for(&mut client, id, JobStatus::Failed).await;
+    server.put("late.bin", content(5000, 2));
+    let again = add(&mut client, job_for()).await;
+    assert_eq!(again, id, "the same job, not a second one");
+    wait_for(&mut client, id, JobStatus::Completed).await;
+}
