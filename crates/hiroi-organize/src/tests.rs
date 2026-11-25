@@ -61,6 +61,13 @@ fn numbered_names_that_are_not_series() {
 }
 
 #[test]
+fn copy_numbers_are_not_episodes() {
+    assert!(episode("clip (1).mp4").is_none());
+    assert!(episode("Annual report (2).pdf").is_none());
+    assert_eq!(of("algebra 3 (1).pdf"), ("algebra".into(), 3));
+}
+
+#[test]
 fn a_marker_with_nothing_before_it_names_the_series() {
     assert_eq!(of("Lecture 3 - Tomatoes.mp4"), ("Lecture".into(), 3));
 }

@@ -72,7 +72,7 @@ impl Episode {
 
 /// Reads the series and number from a file name, if it has them.
 pub fn episode(file_name: &str) -> Option<Episode> {
-    let stem = stem(file_name);
+    let stem = without_copy_number(stem(file_name));
     let tokens = tokens(stem);
     let (series_end, number) = season_episode(&tokens).or_else(|| numbered(&tokens))?;
     let mut series = clean(&stem[..series_end]);
@@ -134,6 +134,20 @@ fn stem(file_name: &str) -> &str {
         }
     }
     stem
+}
+
+/// `report (1)` is a second copy of `report`, as browsers and Hiroi
+/// name them, not part 1 of a series.
+fn without_copy_number(stem: &str) -> &str {
+    let Some(open) = stem.strip_suffix(')').and_then(|rest| rest.rfind(" (")) else {
+        return stem;
+    };
+    let digits = &stem[open + 2..stem.len() - 1];
+    if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+        stem[..open].trim_end()
+    } else {
+        stem
+    }
 }
 
 fn tokens(text: &str) -> Vec<Token<'_>> {

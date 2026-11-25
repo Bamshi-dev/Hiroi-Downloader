@@ -105,7 +105,8 @@ Numbers that describe the file are skipped: `1080p`, `x264`, `10bit`,
 years such as 2024, and numbers of five digits or more. A number
 glued to a word belongs to the name (`CS50 lecture 3` is the series
 `CS50`). Names cameras and programs number by themselves (`IMG_0001`,
-`DSC0042`, `Untitled 2`) are not series.
+`DSC0042`, `Untitled 2`) are not series, and neither are copies
+numbered the way browsers and Hiroi number them (`report (1).pdf`).
 
 Names match regardless of case, spaces, dots, dashes, and
 underscores, and in names of six letters or more, a typo is
