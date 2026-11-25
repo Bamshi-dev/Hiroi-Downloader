@@ -171,6 +171,20 @@ pub fn strip_credentials(url: &str) -> String {
     }
 }
 
+/// What makes two URLs the same download: everything but credentials
+/// and the fragment.
+pub fn duplicate_key(url: &str) -> String {
+    match hiroi_engine::Url::parse(url) {
+        Ok(mut parsed) => {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
+            parsed.set_fragment(None);
+            parsed.to_string()
+        }
+        Err(_) => url.to_string(),
+    }
+}
+
 /// The URL as shown to clients: no credentials, no query string.
 pub fn display_url(url: &str) -> String {
     match hiroi_engine::Url::parse(url) {

@@ -632,22 +632,24 @@ impl Service {
     }
 
     /// A job that is not cancelled and fetches the same file into the
-    /// same place. URLs are compared without credentials and query
-    /// string, since signed links differ on every copy.
+    /// same place. URLs are compared whole, without credentials and the
+    /// fragment: the query often names the file (`watch?v=...`,
+    /// `download.php?id=7`). A signed link copied twice therefore counts
+    /// as two downloads, which is the safer mistake.
     fn duplicate_of(
         &self,
         url: &str,
         dir: &std::path::Path,
         file_name: Option<&str>,
     ) -> Option<StoredJob> {
-        let key = convert::display_url(url);
+        let key = convert::duplicate_key(url);
         let state = self.state.lock();
         state
             .rows
             .values()
             .filter(|row| row.status != JobStatus::Cancelled && row.dir == dir)
             .find(|row| {
-                convert::display_url(&row.url) == key
+                convert::duplicate_key(&row.url) == key
                     && row.options.file_name.as_deref() == file_name
             })
             .cloned()

@@ -396,15 +396,22 @@ async fn categories_sort_files_and_duplicates_are_refused() {
         allow_duplicate: true,
         ..NewJob::default()
     };
+    // The query names the file on many sites: another one is another
+    // download.
+    let other = add(
+        &mut client,
+        NewJob {
+            url: format!("{}?v=2", server.url("clip.mp4")),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    wait_for(&mut client, other, JobStatus::Completed).await;
     let second = add(&mut client, forced).await;
     wait_for(&mut client, second, JobStatus::Completed).await;
-    assert!(
-        fixture
-            .downloads()
-            .join("Videos")
-            .join("clip (1).mp4")
-            .exists()
-    );
+    let videos = fixture.downloads().join("Videos");
+    assert!(videos.join("clip (1).mp4").exists());
+    assert!(videos.join("clip (2).mp4").exists());
 }
 
 #[tokio::test]
