@@ -15,7 +15,7 @@ use crate::ui::ProgressView;
 const EXIT_INTERRUPTED: u8 = 130;
 
 pub async fn run(args: GetArgs, verbose: bool) -> Result<ExitCode> {
-    let urls = collect_urls(&args.urls, args.input.as_deref())?;
+    let urls = collect_urls(&args.urls, args.input.as_deref(), args.literal)?;
     let target = &args.target;
     let single = urls.len() == 1;
     if !single
@@ -66,7 +66,13 @@ pub async fn download(
     Ok(report(&engine, &ids, &view, quiet))
 }
 
-pub fn collect_urls(urls: &[String], input: Option<&std::path::Path>) -> Result<Vec<String>> {
+/// The URLs given and those in `input`, with numbered batches such as
+/// `part[1-9].rar` written out, unless `literal`.
+pub fn collect_urls(
+    urls: &[String],
+    input: Option<&std::path::Path>,
+    literal: bool,
+) -> Result<Vec<String>> {
     let mut urls = urls.to_vec();
     if let Some(path) = input {
         let text = std::fs::read_to_string(path)
@@ -80,7 +86,17 @@ pub fn collect_urls(urls: &[String], input: Option<&std::path::Path>) -> Result<
     if urls.is_empty() {
         bail!("no URLs to download");
     }
-    Ok(urls)
+    if literal {
+        return Ok(urls);
+    }
+    let mut expanded = Vec::with_capacity(urls.len());
+    for url in &urls {
+        expanded.extend(crate::ranges::expand(url)?);
+    }
+    if expanded.len() > crate::ranges::MAX_EXPANDED {
+        bail!("more than {} URLs at once", crate::ranges::MAX_EXPANDED);
+    }
+    Ok(expanded)
 }
 
 async fn wait_all(engine: &Engine, ids: &[DownloadId]) {

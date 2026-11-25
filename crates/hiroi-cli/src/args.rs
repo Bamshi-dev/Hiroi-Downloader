@@ -271,6 +271,11 @@ pub struct AddArgs {
     #[arg(short, long, value_name = "FILE")]
     pub input: Option<PathBuf>,
 
+    /// Take URLs as written: `[1-20]`, `[a-z]`, and `{a,b}` are not
+    /// expanded into numbered batches.
+    #[arg(long)]
+    pub literal: bool,
+
     #[command(flatten)]
     pub target: TargetArgs,
 
@@ -424,6 +429,11 @@ pub struct GetArgs {
     /// Read URLs from a file, one per line (`#` starts a comment).
     #[arg(short, long, value_name = "FILE")]
     pub input: Option<PathBuf>,
+
+    /// Take URLs as written: `[1-20]`, `[a-z]`, and `{a,b}` are not
+    /// expanded into numbered batches.
+    #[arg(long)]
+    pub literal: bool,
 
     #[command(flatten)]
     pub target: TargetArgs,

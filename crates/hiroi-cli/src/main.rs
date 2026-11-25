@@ -3,6 +3,7 @@
 mod args;
 mod commands;
 mod options;
+mod ranges;
 mod settings;
 mod size;
 mod ui;

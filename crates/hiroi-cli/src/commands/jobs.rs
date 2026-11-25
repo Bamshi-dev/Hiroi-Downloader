@@ -26,7 +26,7 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<Client> {
 }
 
 pub async fn add(client: &mut Client, args: AddArgs) -> Result<ExitCode> {
-    let urls = collect_urls(&args.urls, args.input.as_deref())?;
+    let urls = collect_urls(&args.urls, args.input.as_deref(), args.literal)?;
     if urls.len() > 1 && (args.target.output.is_some() || args.target.checksum.is_some()) {
         bail!("--output and --checksum only work with a single URL");
     }
