@@ -95,6 +95,15 @@ pub enum Command {
     /// Give a paused or failed job a new address when its link expired;
     /// what was downloaded is kept if the file is the same.
     Refresh { id: i64, url: String },
+    /// A file's hash, or whether it matches one (sha256:HEX, or plain
+    /// HEX as sites publish it).
+    Checksum {
+        file: PathBuf,
+        expected: Option<String>,
+        /// md5, sha1, sha256, or sha512, when printing a hash.
+        #[arg(long, default_value = "sha256")]
+        algorithm: String,
+    },
     /// Write the job list to a file (or print it), to move it elsewhere.
     /// Cookies and commands are left out.
     Export {

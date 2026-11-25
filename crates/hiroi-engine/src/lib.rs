@@ -49,7 +49,7 @@ mod task;
 mod torrent;
 mod xml;
 
-pub use checksum::{Checksum, HashAlgorithm};
+pub use checksum::{Checksum, HashAlgorithm, hash_file};
 pub use config::EngineConfig;
 pub use constants::{CONTROL_EXTENSION, MAX_CONNECTIONS, PART_EXTENSION};
 pub use engine::Engine;

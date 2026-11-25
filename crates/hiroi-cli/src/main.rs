@@ -29,6 +29,11 @@ async fn main() -> ExitCode {
         Command::Browser(command) => commands::browser::run(command),
         Command::NativeHost { .. } => commands::browser::native_host(cli.socket).await,
         Command::Network(command) => commands::network::run(command),
+        Command::Checksum {
+            file,
+            expected,
+            algorithm,
+        } => commands::checksum::run(&file, &algorithm, expected.as_deref()),
         Command::Export { file, finished } => {
             commands::transfer::export(file, finished, cli.socket).await
         }
@@ -114,6 +119,7 @@ async fn client_command(
         | Command::NativeHost { .. }
         | Command::Network(_)
         | Command::Settings { .. }
+        | Command::Checksum { .. }
         | Command::Export { .. }
         | Command::Import { .. }
         | Command::Search { .. } => {

@@ -18,7 +18,7 @@ pub enum HashAlgorithm {
 
 impl HashAlgorithm {
     /// `sha-256`, `SHA256`, `md5`, and so on.
-    pub(crate) fn from_name(name: &str) -> Option<Self> {
+    pub fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().replace('-', "").as_str() {
             "md5" => Some(Self::Md5),
             "sha1" => Some(Self::Sha1),
@@ -171,7 +171,8 @@ fn hash_piece(
     }
 }
 
-fn hash_file(path: &Path, algorithm: HashAlgorithm) -> io::Result<String> {
+/// The file's hash, in lower-case hex.
+pub fn hash_file(path: &Path, algorithm: HashAlgorithm) -> io::Result<String> {
     let file = File::open(path)?;
     match algorithm {
         HashAlgorithm::Md5 => hash_reader::<md5::Md5>(file),

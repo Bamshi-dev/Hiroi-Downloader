@@ -1,6 +1,7 @@
 //! One module per subcommand.
 
 pub mod browser;
+pub mod checksum;
 pub mod clipboard;
 pub mod daemon;
 pub mod exposure;
