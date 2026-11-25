@@ -258,3 +258,57 @@ async fn a_missing_yt_dlp_is_reported_plainly() {
         snapshot.status
     );
 }
+
+/// A page and its clip, served by `server`; the request carries the
+/// browser's cookie.
+async fn page_with_cookie(server: &TestServer) -> (DownloadRequest, tempfile::TempDir) {
+    server.put_typed("clip.mp4", content(200_000, 3), "video/mp4");
+    server.put_typed(
+        "watch.html",
+        page("Talk", "clip.mp4", "video/mp4"),
+        "text/html",
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let request = DownloadRequest::new(&server.url("watch.html"))
+        .unwrap()
+        .output_dir(dir.path())
+        .header("Cookie", "session=1")
+        .unwrap()
+        .extract(true);
+    (request, dir)
+}
+
+#[tokio::test]
+async fn public_pages_are_read_without_the_browsers_cookies() {
+    if !installed("yt-dlp") {
+        return;
+    }
+    let server = TestServer::start(Behavior::default()).await;
+    let (request, _dir) = page_with_cookie(&server).await;
+    let snapshot = run(&engine(EngineConfig::default()), request).await;
+
+    assert_eq!(snapshot.status, DownloadStatus::Completed, "{snapshot:?}");
+    let pages: Vec<_> = server
+        .received()
+        .into_iter()
+        .filter(|r| r.name == "watch.html")
+        .collect();
+    assert!(!pages.is_empty());
+    assert!(pages.iter().all(|r| r.headers.get("cookie").is_none()));
+}
+
+#[tokio::test]
+async fn pages_behind_a_login_get_the_cookies_next() {
+    if !installed("yt-dlp") {
+        return;
+    }
+    let server = TestServer::start(Behavior {
+        require_cookie: Some("session=1".into()),
+        ..Behavior::default()
+    })
+    .await;
+    let (request, _dir) = page_with_cookie(&server).await;
+    let snapshot = run(&engine(EngineConfig::default()), request).await;
+
+    assert_eq!(snapshot.status, DownloadStatus::Completed, "{snapshot:?}");
+}

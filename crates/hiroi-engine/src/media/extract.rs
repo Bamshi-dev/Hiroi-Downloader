@@ -148,10 +148,29 @@ fn selector(request: &DownloadRequest) -> Option<String> {
     }
 }
 
+/// The formats chosen when yt-dlp was asked, then the same choice again:
+/// sites such as YouTube can answer the second request with other
+/// format numbers, and the exact ones are then gone.
+fn delegate_selector(formats: &[&str], request: &DownloadRequest) -> String {
+    let again = selector(request).unwrap_or_else(|| "bv*+ba/b".into());
+    format!("{}/{again}", formats.join("+"))
+}
+
 pub(crate) async fn download(ctx: &Arc<TaskContext>) -> Result<PathBuf> {
     let page = ctx.request.url().clone();
-    let config = ConfigFile::write(ctx)?;
-    let media = or_cancel(&ctx.cancel, resolve(ctx, &page, &config)).await??;
+    // Without the browser's cookies first. Signed in, some sites (YouTube
+    // among them) offer yt-dlp fewer formats, or none it can use; the
+    // cookies are for pages that need a login, and are tried next.
+    let mut config = ConfigFile::write(ctx, false)?;
+    let mut media = or_cancel(&ctx.cancel, resolve(ctx, &page, &config)).await?;
+    if let Err(error) = &media
+        && ctx.request.own_cookies.is_some()
+    {
+        tracing::info!(%error, "trying again with the browser's cookies");
+        config = ConfigFile::write(ctx, true)?;
+        media = or_cancel(&ctx.cancel, resolve(ctx, &page, &config)).await?;
+    }
+    let media = media?;
     tracing::info!(
         title = %media.title,
         formats = %media.tracks.iter().map(|t| t.format_id.as_str()).collect::<Vec<_>>().join("+"),
@@ -287,7 +306,7 @@ async fn delegate(
              %(progress.total_bytes_estimate)s %(progress.speed)s"
         ))
         .arg("-f")
-        .arg(formats.join("+"))
+        .arg(delegate_selector(&formats, &ctx.request))
         .arg("--merge-output-format")
         .arg(&media.ext)
         .arg("-o")
@@ -394,7 +413,7 @@ struct ConfigFile {
 }
 
 impl ConfigFile {
-    fn write(ctx: &TaskContext) -> Result<Self> {
+    fn write(ctx: &TaskContext, cookies: bool) -> Result<Self> {
         let mut lines = Vec::new();
         if let Some(proxy) = &ctx.shared.config.proxy {
             lines.push(format!("--proxy {}", quote(proxy)));
@@ -406,8 +425,9 @@ impl ConfigFile {
                 quote(&format!("{name}:{value}"))
             ));
         }
-        // yt-dlp reads the page itself, so it needs the user's cookies.
-        if let Some(cookies) = &ctx.request.own_cookies {
+        // yt-dlp reads the page itself, so a page behind a login needs
+        // the user's cookies.
+        if let Some(cookies) = ctx.request.own_cookies.as_ref().filter(|_| cookies) {
             lines.push(format!(
                 "--add-header {}",
                 quote(&format!("Cookie:{cookies}"))
