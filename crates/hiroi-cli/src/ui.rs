@@ -44,6 +44,12 @@ impl ProgressView {
     /// Removes the bars once everything is settled, so the summary that
     /// follows starts on a clean line.
     pub fn finish(&self) {
+        // Each bar first: a finished bar is drawn again by its ticker
+        // after a clear of the whole set, which repeated the summary.
+        let bars = self.bars.lock().unwrap_or_else(PoisonError::into_inner);
+        for bar in bars.values() {
+            bar.finish_and_clear();
+        }
         let _ = self.multi.clear();
     }
 

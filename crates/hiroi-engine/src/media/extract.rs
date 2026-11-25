@@ -17,7 +17,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -170,7 +170,17 @@ pub(crate) async fn download(ctx: &Arc<TaskContext>) -> Result<PathBuf> {
         config = ConfigFile::write(ctx, true)?;
         media = or_cancel(&ctx.cancel, resolve(ctx, &page, &config)).await?;
     }
-    let media = media?;
+    let media = match media {
+        Ok(media) => media,
+        Err(EngineError::Extractor(reason)) => {
+            let note = age_note(&ctx.shared.config.yt_dlp).await;
+            return Err(EngineError::Extractor(match note {
+                Some(note) => format!("{reason}; {note}"),
+                None => reason,
+            }));
+        }
+        Err(error) => return Err(error),
+    };
     tracing::info!(
         title = %media.title,
         formats = %media.tracks.iter().map(|t| t.format_id.as_str()).collect::<Vec<_>>().join("+"),
@@ -403,7 +413,47 @@ fn last_error(stderr: &[u8]) -> String {
         .or_else(|| text.lines().rev().find(|line| !line.trim().is_empty()))
         .unwrap_or("yt-dlp failed without saying why");
     let line = line.trim_start_matches("ERROR:").trim();
+    // yt-dlp's advice here is about its own options, not Hiroi's.
+    if line.contains("Cloudflare anti-bot challenge") {
+        return "the site turns away programs (a Cloudflare check), so yt-dlp cannot read the page"
+            .into();
+    }
     line.chars().take(300).collect()
+}
+
+/// yt-dlp older than this many days is likely to fail on sites that
+/// changed since.
+const OLD_YT_DLP_DAYS: i64 = 120;
+
+/// A note for an error when yt-dlp is old, since sites change often and
+/// an old yt-dlp is the commonest cause of failures.
+async fn age_note(program: &Path) -> Option<String> {
+    let output = Command::new(program)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .output();
+    let output = tokio::time::timeout(Duration::from_secs(10), output)
+        .await
+        .ok()?
+        .ok()?;
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut parts = version.split('.').map(|part| part.parse::<i64>().ok());
+    let (year, month, day) = (parts.next()??, parts.next()??, parts.next()??);
+    let released = days_from_civil(year, month, day);
+    let today = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as i64 / 86_400;
+    (today - released > OLD_YT_DLP_DAYS).then(|| {
+        format!("yt-dlp {version} is old; update it (`yt-dlp -U`, or through your package manager)")
+    })
+}
+
+/// Days since 1970-01-01 of a calendar date (proleptic Gregorian).
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 /// A yt-dlp config file only we can read, removed when dropped. It
@@ -526,6 +576,13 @@ mod tests {
         let headers = track_headers(&track).unwrap();
         assert_eq!(headers.len(), 1);
         assert_eq!(headers["referer"], "https://site.example/watch");
+    }
+
+    #[test]
+    fn calendar_days() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2000, 3, 1), 11_017);
+        assert_eq!(days_from_civil(2025, 4, 30), 20_208);
     }
 
     #[test]

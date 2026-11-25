@@ -142,7 +142,7 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum SettingsCommand {
     /// Every setting with its value, or those of one section (network,
-    /// privacy, disk, service).
+    /// privacy, disk, programs, service).
     List { section: Option<String> },
     /// One setting's value.
     Get { key: String },
@@ -678,6 +678,11 @@ pub struct EngineArgs {
     /// the way can read and change the download).
     #[arg(long)]
     pub no_check_certificate: bool,
+
+    /// The yt-dlp program to use for video sites [default: yt-dlp, as
+    /// found on the PATH].
+    #[arg(long, value_name = "PATH")]
+    pub yt_dlp: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]

@@ -48,6 +48,11 @@ pub fn engine_config(engine: &EngineArgs) -> Result<EngineConfig> {
         allow_local_redirects: on(engine.allow_local_redirects, "allow-local-redirects"),
         anonymous: on(engine.anonymous, "anonymous"),
         accept_invalid_certificates: on(engine.no_check_certificate, "no-check-certificate"),
+        yt_dlp: engine
+            .yt_dlp
+            .clone()
+            .or_else(|| file.text("yt-dlp").map(PathBuf::from))
+            .unwrap_or(defaults.yt_dlp.clone()),
         ..defaults
     })
 }

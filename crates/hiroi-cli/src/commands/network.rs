@@ -34,9 +34,9 @@ pub fn run(command: NetworkCommand) -> Result<ExitCode> {
         NetworkCommand::CheckFilter { file } => {
             let filter = IpFilter::load(&file)?;
             println!(
-                "{} ranges blocked; {} lines could not be read.",
+                "{} ranges blocked; {} could not be read.",
                 filter.len(),
-                filter.skipped()
+                filter.skipped_lines()
             );
             Ok(ExitCode::SUCCESS)
         }

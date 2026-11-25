@@ -194,6 +194,13 @@ pub const SETTINGS: &[Setting] = &[
         "false",
         "Don't flush downloads to disk before calling them saved; faster, less safe on power loss.",
     ),
+    file(
+        "yt-dlp",
+        "programs",
+        Kind::Path,
+        "",
+        "The yt-dlp program for video sites, when the one on the PATH is not the right one.",
+    ),
     service(
         "notifications",
         Kind::Switch,
@@ -251,7 +258,7 @@ pub fn parse(setting: &Setting, value: &str) -> Result<toml::Value> {
         Kind::Number => toml::Value::Integer(
             value
                 .parse::<u32>()
-                .with_context(|| format!("`{}` takes a whole number", setting.key))?
+                .map_err(|_| anyhow::anyhow!("`{}` takes a whole number, such as 8", setting.key))?
                 .into(),
         ),
         Kind::Rate => {

@@ -40,9 +40,9 @@ impl IpFilter {
         let filter = Self::parse(&String::from_utf8_lossy(&text));
         if filter.is_empty() {
             return Err(EngineError::Config(format!(
-                "the IP filter {} blocks nothing ({} lines could not be read)",
+                "the IP filter {} blocks nothing ({} could not be read)",
                 path.display(),
-                filter.skipped
+                lines(filter.skipped)
             )));
         }
         Ok(filter)
@@ -81,6 +81,11 @@ impl IpFilter {
         self.len() == 0
     }
 
+    /// Lines that were neither entries nor comments, as `3 lines`.
+    pub fn skipped_lines(&self) -> String {
+        lines(self.skipped)
+    }
+
     /// Lines that were neither entries nor comments.
     pub fn skipped(&self) -> usize {
         self.skipped
@@ -99,6 +104,14 @@ impl IpFilter {
             // A range from an IPv4 to an IPv6 address means nothing.
             _ => self.skipped += 1,
         }
+    }
+}
+
+fn lines(count: usize) -> String {
+    if count == 1 {
+        "1 line".into()
+    } else {
+        format!("{count} lines")
     }
 }
 
