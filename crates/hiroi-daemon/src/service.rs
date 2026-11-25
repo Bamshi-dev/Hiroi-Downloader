@@ -448,7 +448,15 @@ impl Service {
                     .file_name
                     .clone()
                     .or_else(|| category::name_from_url(&job.url));
-                category::folder_for(&self.categories(), &self.default_dir, name.as_deref())
+                let host = hiroi_engine::Url::parse(&job.url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_string));
+                category::folder_for(
+                    &self.categories(),
+                    &self.default_dir,
+                    name.as_deref(),
+                    host.as_deref(),
+                )
             }
         };
         convert::validate(&job, &dir).map_err(|e| e.to_string())?;

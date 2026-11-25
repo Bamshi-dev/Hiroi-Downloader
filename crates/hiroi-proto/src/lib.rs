@@ -226,6 +226,10 @@ pub struct Category {
     /// Lower case, without the dot.
     pub extensions: Vec<String>,
     pub folder: String,
+    /// Host names; their subdomains match too. With extensions as well,
+    /// both have to match.
+    #[serde(default)]
+    pub sites: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

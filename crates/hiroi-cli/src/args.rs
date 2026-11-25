@@ -371,8 +371,12 @@ pub enum CategoryCommand {
         #[arg(long)]
         folder: String,
         /// Extensions, comma separated: mp4,mkv
-        #[arg(long, value_delimiter = ',', required = true)]
+        #[arg(long, value_delimiter = ',', required_unless_present = "site")]
         ext: Vec<String>,
+        /// Sites, comma separated, with their subdomains:
+        /// uni.example.edu. With --ext too, both have to match.
+        #[arg(long, value_delimiter = ',')]
+        site: Vec<String>,
     },
     Remove {
         name: String,

@@ -405,8 +405,13 @@ pub async fn category(client: &mut Client, command: CategoryCommand) -> Result<E
                 if categories.enabled { "on" } else { "off" }
             );
             for category in &categories.categories {
+                let sites = if category.sites.is_empty() {
+                    String::new()
+                } else {
+                    format!("  sites: {}", category.sites.join(","))
+                };
                 println!(
-                    "{:<12}  {:<12}  {}",
+                    "{:<12}  {:<12}  {}{sites}",
                     category.name,
                     category.folder,
                     category.extensions.join(",")
@@ -416,10 +421,21 @@ pub async fn category(client: &mut Client, command: CategoryCommand) -> Result<E
         }
         CategoryCommand::On => categories.enabled = true,
         CategoryCommand::Off => categories.enabled = false,
-        CategoryCommand::Set { name, folder, ext } => {
+        CategoryCommand::Set {
+            name,
+            folder,
+            ext,
+            site,
+        } => {
             let extensions = ext
                 .iter()
                 .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+                .filter(|e| !e.is_empty())
+                .collect();
+            let sites = site
+                .iter()
+                .map(|s| s.trim().trim_start_matches("www.").to_ascii_lowercase())
+                .filter(|s| !s.is_empty())
                 .collect();
             categories
                 .categories
@@ -428,6 +444,7 @@ pub async fn category(client: &mut Client, command: CategoryCommand) -> Result<E
                 name,
                 folder,
                 extensions,
+                sites,
             });
         }
         CategoryCommand::Remove { name } => {
