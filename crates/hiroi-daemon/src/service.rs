@@ -296,6 +296,17 @@ impl Service {
             Request::Add(job) => self.add(*job).await.map(|job| Response::Added { job }),
             Request::AddBatch(batch) => Ok(Response::Batch(self.add_batch(*batch).await)),
             Request::Refresh { job, url } => self.refresh(job, &url).map(done),
+            Request::Export { finished } => {
+                let state = self.state.lock();
+                let jobs = state
+                    .rows
+                    .values()
+                    .filter(|row| row.status != JobStatus::Cancelled)
+                    .filter(|row| finished || row.status != JobStatus::Completed)
+                    .map(convert::exported)
+                    .collect();
+                Ok(Response::Exported { jobs })
+            }
             Request::Groups => Ok(Response::Groups {
                 groups: self.groups(),
             }),

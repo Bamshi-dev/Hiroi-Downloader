@@ -10,3 +10,4 @@ pub mod info;
 pub mod jobs;
 pub mod network;
 pub mod settings;
+pub mod transfer;

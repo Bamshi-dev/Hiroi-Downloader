@@ -19,6 +19,7 @@ hiroi-engine.workspace = true
 hiroi-grab.workspace = true
 hiroi-proto.workspace = true
 indicatif.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
 tokio.workspace = true

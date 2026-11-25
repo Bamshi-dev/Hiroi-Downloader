@@ -95,6 +95,20 @@ pub enum Command {
     /// Give a paused or failed job a new address when its link expired;
     /// what was downloaded is kept if the file is the same.
     Refresh { id: i64, url: String },
+    /// Write the job list to a file (or print it), to move it elsewhere.
+    /// Cookies and commands are left out.
+    Export {
+        #[arg(value_name = "FILE")]
+        file: Option<PathBuf>,
+        /// Finished jobs too.
+        #[arg(long)]
+        finished: bool,
+    },
+    /// Add the jobs of a list written by `hiroi export`.
+    Import {
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+    },
     /// List, pause, or resume groups of jobs.
     #[command(subcommand)]
     Group(GroupCommand),

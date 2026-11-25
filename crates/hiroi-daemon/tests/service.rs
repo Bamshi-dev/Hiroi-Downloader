@@ -662,3 +662,52 @@ async fn expired_addresses_can_be_refreshed() {
     });
     assert!(!full, "the saved part was fetched again: {fresh:?}");
 }
+
+#[tokio::test]
+async fn exports_leave_cookies_and_commands_out() {
+    let server = TestServer::start(Behavior::default()).await;
+    server.put("done.bin", content(1000, 1));
+    let fixture = Fixture::new();
+    let (_service, mut client) = fixture.start().await;
+
+    let done = add(
+        &mut client,
+        NewJob {
+            url: server.url("done.bin"),
+            ..NewJob::default()
+        },
+    )
+    .await;
+    wait_for(&mut client, done, JobStatus::Completed).await;
+    add(
+        &mut client,
+        NewJob {
+            url: format!("{}?token=abc", server.url("later.bin")),
+            paused: true,
+            headers: vec![("Cookie".into(), "session=secret".into())],
+            run_after: Some(vec!["echo".into(), "{path}".into()]),
+            group: Some("Later".into()),
+            ..NewJob::default()
+        },
+    )
+    .await;
+
+    let export = |finished| Request::Export { finished };
+    let Response::Exported { jobs } = client.call(export(false)).await.unwrap() else {
+        panic!("unexpected reply");
+    };
+    assert_eq!(jobs.len(), 1, "finished jobs stay out by default");
+    let job = &jobs[0];
+    assert!(
+        job.url.ends_with("later.bin?token=abc"),
+        "the whole address: {}",
+        job.url
+    );
+    assert!(job.headers.is_empty());
+    assert!(job.run_after.is_none());
+    assert_eq!(job.group.as_deref(), Some("Later"));
+    let Response::Exported { jobs } = client.call(export(true)).await.unwrap() else {
+        panic!("unexpected reply");
+    };
+    assert_eq!(jobs.len(), 2);
+}

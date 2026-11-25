@@ -29,6 +29,10 @@ async fn main() -> ExitCode {
         Command::Browser(command) => commands::browser::run(command),
         Command::NativeHost { .. } => commands::browser::native_host(cli.socket).await,
         Command::Network(command) => commands::network::run(command),
+        Command::Export { file, finished } => {
+            commands::transfer::export(file, finished, cli.socket).await
+        }
+        Command::Import { file } => commands::transfer::import(&file, cli.socket).await,
         Command::Settings { command } => {
             let command = command.unwrap_or(args::SettingsCommand::List { section: None });
             commands::settings::run(command, cli.socket).await
@@ -110,6 +114,8 @@ async fn client_command(
         | Command::NativeHost { .. }
         | Command::Network(_)
         | Command::Settings { .. }
+        | Command::Export { .. }
+        | Command::Import { .. }
         | Command::Search { .. } => {
             unreachable!("handled in main")
         }

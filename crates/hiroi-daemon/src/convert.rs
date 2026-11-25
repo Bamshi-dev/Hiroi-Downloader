@@ -9,6 +9,32 @@ use hiroi_engine::{
 use hiroi_proto::{Conflict, Job, JobStatus, NewJob, Quality};
 use hiroi_store::{JobOptions, StoredJob};
 
+/// A job as it could be added again. Headers and the command to run
+/// after it are left out: headers hold cookies, and an exported list may
+/// be opened by someone else, whose machine should not run commands
+/// from it.
+pub fn exported(row: &StoredJob) -> NewJob {
+    let options = &row.options;
+    NewJob {
+        url: row.url.clone(),
+        mirrors: row.mirrors.clone(),
+        dir: Some(row.dir.clone()),
+        file_name: options.file_name.clone(),
+        connections: options.connections,
+        speed_limit: options.speed_limit,
+        checksum: options.checksum.clone(),
+        on_conflict: options.on_conflict,
+        priority: options.priority,
+        queue: Some(row.queue.clone()),
+        quality: options.quality,
+        live_limit_secs: options.live_limit_secs,
+        extract: options.extract,
+        format: options.format.clone(),
+        group: options.group.clone(),
+        ..NewJob::default()
+    }
+}
+
 pub fn job_options(job: &NewJob) -> JobOptions {
     JobOptions {
         file_name: job.file_name.clone(),

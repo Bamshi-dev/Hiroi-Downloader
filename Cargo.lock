@@ -1550,6 +1550,7 @@ dependencies = [
  "hiroi-grab",
  "hiroi-proto",
  "indicatif",
+ "serde",
  "serde_json",
  "shell-words",
  "tempfile",

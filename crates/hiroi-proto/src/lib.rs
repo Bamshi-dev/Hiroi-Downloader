@@ -107,6 +107,12 @@ pub enum Request {
         job: JobId,
         url: String,
     },
+    /// The jobs as they were added, for moving them elsewhere. Without
+    /// headers (which hold cookies) or commands to run.
+    Export {
+        /// Finished jobs too.
+        finished: bool,
+    },
     /// Groups with their job counts.
     Groups,
     PauseGroup {
@@ -338,6 +344,7 @@ pub enum Response {
     Categories(Categories),
     ScheduleAdded { id: i64 },
     Batch(BatchAdded),
+    Exported { jobs: Vec<NewJob> },
     Groups { groups: Vec<GroupInfo> },
     ServiceSettings(ServiceSettings),
     Done,
