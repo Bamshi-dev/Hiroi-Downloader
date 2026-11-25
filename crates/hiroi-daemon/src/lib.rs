@@ -12,6 +12,7 @@
 //! the kernel's peer credentials.
 
 mod actions;
+mod awake;
 pub mod category;
 pub mod client;
 mod convert;

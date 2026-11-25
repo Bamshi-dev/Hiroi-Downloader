@@ -24,6 +24,7 @@ use parking_lot::Mutex;
 use tokio::sync::{Notify, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
+use crate::awake::KeepAwake;
 use crate::schedule::{self, Desired, Moment};
 use crate::{actions, category, convert, folders, paths, server, unpack};
 
@@ -37,6 +38,7 @@ const CATEGORIES_KEY: &str = "categories";
 const NOTIFICATIONS_KEY: &str = "notifications";
 const SMART_FOLDERS_KEY: &str = "smart_folders";
 const UNPACK_KEY: &str = "unpack_archives";
+const KEEP_AWAKE_KEY: &str = "keep_awake";
 /// The command run after every download, as a JSON argument list.
 const AFTER_DOWNLOAD_KEY: &str = "after_download";
 
@@ -165,6 +167,8 @@ struct State {
     smart_folders: bool,
     unpack_archives: bool,
     after_download: Option<Vec<String>>,
+    keep_awake: bool,
+    awake: KeepAwake,
     /// Archives unpacked since the service started, so a set of parts is
     /// unpacked once.
     unpacked: HashSet<PathBuf>,
@@ -232,6 +236,7 @@ impl Service {
                         store.setting(SMART_FOLDERS_KEY)?,
                         store.setting(UNPACK_KEY)?,
                         store.setting(AFTER_DOWNLOAD_KEY)?,
+                        store.setting(KEEP_AWAKE_KEY)?,
                     ),
                 ))
             })
@@ -248,6 +253,7 @@ impl Service {
             state.notifications = switches.0.as_deref() != Some("off");
             state.smart_folders = switches.1.as_deref() != Some("off");
             state.unpack_archives = switches.2.as_deref() == Some("on");
+            state.keep_awake = switches.4.as_deref() != Some("off");
             state.after_download = switches
                 .3
                 .as_deref()
@@ -333,6 +339,12 @@ impl Service {
                 self.save_switch(SMART_FOLDERS_KEY, enabled);
                 Ok(Response::Done)
             }
+            Request::SetKeepAwake { enabled } => {
+                self.state.lock().keep_awake = enabled;
+                self.save_switch(KEEP_AWAKE_KEY, enabled);
+                self.update_awake();
+                Ok(Response::Done)
+            }
             Request::SetUnpackArchives { enabled } => {
                 self.state.lock().unpack_archives = enabled;
                 self.save_switch(UNPACK_KEY, enabled);
@@ -356,6 +368,7 @@ impl Service {
                     global_speed_limit: state.base_limit,
                     unpack_archives: state.unpack_archives,
                     after_download: state.after_download.clone(),
+                    keep_awake: state.keep_awake,
                 }))
             }
             Request::List => Ok(Response::Jobs { jobs: self.jobs() }),
@@ -1128,8 +1141,26 @@ impl Service {
             };
             apply(row, &update);
         }
+        let status_changed = update.status.is_some();
         let _ = self.writes.send(Write::Update(id, update));
         self.publish(id);
+        if status_changed {
+            self.update_awake();
+        }
+    }
+
+    /// Holds the computer awake while a job transfers, if the user lets
+    /// the service; see [`KeepAwake`].
+    fn update_awake(&self) {
+        let mut state = self.state.lock();
+        let transferring = state.rows.values().any(|row| {
+            matches!(
+                row.status,
+                JobStatus::Connecting | JobStatus::Downloading | JobStatus::Verifying
+            )
+        });
+        let awake = state.keep_awake && transferring;
+        state.awake.set(awake);
     }
 
     fn publish(&self, id: JobId) {

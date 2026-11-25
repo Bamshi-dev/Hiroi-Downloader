@@ -126,6 +126,11 @@ pub enum Request {
     SetSmartFolders {
         enabled: bool,
     },
+    /// Keep the computer from sleeping while downloads run (on by
+    /// default).
+    SetKeepAwake {
+        enabled: bool,
+    },
     /// Unpack finished archives into a folder next to them (off by
     /// default).
     SetUnpackArchives {
@@ -389,6 +394,8 @@ pub struct ServiceSettings {
     pub unpack_archives: bool,
     #[serde(default)]
     pub after_download: Option<Vec<String>>,
+    #[serde(default)]
+    pub keep_awake: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

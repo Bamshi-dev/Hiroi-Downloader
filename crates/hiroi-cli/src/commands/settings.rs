@@ -91,6 +91,7 @@ fn current(setting: &Setting, file: &SettingsFile, service: Option<&ServiceSetti
                 "notifications" => on_off(service.notifications),
                 "smart-folders" => on_off(service.smart_folders),
                 "unpack-archives" => on_off(service.unpack_archives),
+                "keep-awake" => on_off(service.keep_awake),
                 "after-download" => service
                     .after_download
                     .as_ref()
@@ -145,6 +146,9 @@ async fn set(key: &str, value: Option<&str>, socket: Option<PathBuf>) -> Result<
                     enabled: enabled()?,
                 },
                 "smart-folders" => Request::SetSmartFolders {
+                    enabled: enabled()?,
+                },
+                "keep-awake" => Request::SetKeepAwake {
                     enabled: enabled()?,
                 },
                 "unpack-archives" => Request::SetUnpackArchives {

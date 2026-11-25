@@ -213,6 +213,12 @@ pub const SETTINGS: &[Setting] = &[
         "Combined speed limit of the service's downloads, e.g. 2M.",
     ),
     service(
+        "keep-awake",
+        Kind::Switch,
+        "true",
+        "Keep the computer from sleeping while downloads run.",
+    ),
+    service(
         "unpack-archives",
         Kind::Switch,
         "false",
